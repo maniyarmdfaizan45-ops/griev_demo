@@ -3,14 +3,13 @@ import { Link } from 'react-router-dom';
 import {
   ArrowRight,
   BarChart3,
-  Building2,
   Droplets,
-  FileText,
   MapPinned,
   ShieldCheck,
   Trash2,
   Zap,
 } from 'lucide-react';
+
 
 const serviceCards = [
   {

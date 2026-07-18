@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { apiService } from '../services/api';
-import { Sparkles, Send, ShieldAlert, BadgeInfo, AlertCircle, CheckCircle2, RefreshCw, Upload, Image as ImageIcon } from 'lucide-react';
+import { Sparkles, Send, ShieldAlert, BadgeInfo, AlertCircle, CheckCircle2, RefreshCw, Upload } from 'lucide-react';
 
 export default function SubmitComplaint() {
   const routeLocation = useLocation();

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
-import { Search, Filter, RefreshCw, ChevronLeft, ChevronRight, AlertCircle, Inbox, ShieldCheck, ClipboardList, CheckCircle2, Clock } from 'lucide-react';
+import { Search, Filter, RefreshCw, ChevronLeft, ChevronRight, AlertCircle, Inbox, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 export default function History() {
   const [activeTab, setActiveTab] = useState('track'); // 'track' or 'ledger'
@@ -22,7 +22,7 @@ export default function History() {
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const fetchComplaints = async () => {
+  const fetchComplaints = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -44,11 +44,11 @@ export default function History() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, search, category, priority, status, page]);
 
   useEffect(() => {
     fetchComplaints();
-  }, [category, priority, status, page, activeTab]);
+  }, [fetchComplaints]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();

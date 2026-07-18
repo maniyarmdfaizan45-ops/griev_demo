@@ -18,7 +18,6 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const token = localStorage.getItem('admin_token');
-  const user = JSON.parse(localStorage.getItem('admin_user') || '{}');
 
   const handleLogout = () => {
     localStorage.removeItem('admin_token');

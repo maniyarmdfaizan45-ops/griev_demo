@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api';
 import {
@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, LineChart, Line, CartesianGrid
 } from 'recharts';
 import {
-  ShieldAlert, Files, Clock, CheckCircle2, ChevronLeft, ChevronRight,
+  ShieldAlert, Clock, CheckCircle2, ChevronLeft, ChevronRight,
   RefreshCw, Check, Play, Inbox, AlertCircle, Search,
   LayoutDashboard, FileText, Building2, Sparkles, Download, Users, Settings, LogOut, ChevronRight as ChevronRightIcon
 } from 'lucide-react';
@@ -39,7 +39,7 @@ export default function Dashboard() {
     }
   }, [navigate]);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -70,11 +70,11 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, category, priority, status, page, limit, selectedAIComplaint]);
 
   useEffect(() => {
     fetchDashboardData();
-  }, [category, priority, status, page, activeTab]);
+  }, [fetchDashboardData]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -137,6 +137,17 @@ export default function Dashboard() {
       Low: 'bg-green-50 text-[#16A34A] border-green-200',
     };
     return mapping[pri] || 'bg-slate-100 text-slate-600 border-slate-200';
+  };
+
+  const getCategoryBadgeClass = (cat) => {
+    const mapping = {
+      Water: 'bg-blue-50 text-[#1E40AF] border-blue-300',
+      Electricity: 'bg-orange-50 text-[#EA580C] border-orange-300',
+      Road: 'bg-green-50 text-[#16A34A] border-green-300',
+      Garbage: 'bg-slate-100 text-slate-700 border-slate-300',
+      Others: 'bg-slate-100 text-slate-600 border-slate-300',
+    };
+    return mapping[cat] || 'bg-slate-100 text-slate-600 border-slate-300';
   };
 
   const getPieChartData = () => {
