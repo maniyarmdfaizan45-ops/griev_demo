@@ -70,6 +70,12 @@ def token_required(f):
         try:
             # Decode token
             payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            # Reject citizen session tokens on admin endpoints
+            if payload.get('role') == 'citizen':
+                return jsonify({
+                    "status": "error",
+                    "message": "Admin authorization required!"
+                }), 403
             # Extract username and attach to request context
             request.current_user = payload['sub']
         except jwt.ExpiredSignatureError:

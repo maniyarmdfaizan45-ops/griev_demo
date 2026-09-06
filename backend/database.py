@@ -717,6 +717,13 @@ class GrievanceDB:
 
         total = len(filtered)
         page_items = filtered[skip : skip + limit]
+        if not is_admin:
+            sanitized_items = []
+            for item in page_items:
+                clean_item = {k: v for k, v in item.items() if k not in {"name", "phone", "location", "address"}}
+                sanitized_items.append(clean_item)
+            page_items = sanitized_items
+
         return page_items, total
 
     def get_complaint(self, complaint_id):
@@ -728,7 +735,11 @@ class GrievanceDB:
             complaint["status"] = normalize_status(complaint.get("status"))
             complaint["grievance_id"] = complaint.get("grievance_id")
             complaint["department"] = complaint.get("department") or get_department_for_category(complaint.get("category"))
-            return self._with_sla_data(complaint)
+            c = self._with_sla_data(complaint)
+            if c:
+                for f in ("name", "phone", "location", "address"):
+                    c.pop(f, None)
+            return c
 
         conn = sqlite3.connect(self.sqlite_path)
         conn.row_factory = sqlite3.Row
@@ -736,7 +747,7 @@ class GrievanceDB:
         conn.close()
         if not row:
             return None
-        return self._with_sla_data({
+        c = self._with_sla_data({
             "id": row["id"],
             "complaint_text": row["complaint_text"],
             "category": row["category"],
@@ -765,6 +776,10 @@ class GrievanceDB:
             "reopened_reason": row["reopened_reason"],
             "reopened_by": row["reopened_by"],
         })
+        if c:
+            for f in ("name", "phone", "location", "address"):
+                c.pop(f, None)
+        return c
 
     def get_complaint_by_grievance_id(self, grievance_id):
         if self.db_type == 'mongodb':
