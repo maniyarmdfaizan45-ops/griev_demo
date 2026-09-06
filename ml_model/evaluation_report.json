@@ -1,0 +1,118 @@
+{
+  "random_state": 42,
+  "test_size": 0.2,
+  "cv_folds": 5,
+  "dataset_samples": 600,
+  "train_samples": 480,
+  "test_samples": 120,
+  "selected_model": "Logistic Regression",
+  "cv_results": {
+    "Multinomial Naive Bayes": {
+      "accuracy": {
+        "mean": 0.9458333333333332,
+        "std": 0.029017475577466915
+      },
+      "precision_macro": {
+        "mean": 0.9489813264463958,
+        "std": 0.026285368721633458
+      },
+      "recall_macro": {
+        "mean": 0.9458947368421052,
+        "std": 0.028880113258577388
+      },
+      "f1_macro": {
+        "mean": 0.9457705675882826,
+        "std": 0.02881637658875481
+      }
+    },
+    "Logistic Regression": {
+      "accuracy": {
+        "mean": 0.9520833333333334,
+        "std": 0.035232363594349496
+      },
+      "precision_macro": {
+        "mean": 0.9542335875338972,
+        "std": 0.034498931335945254
+      },
+      "recall_macro": {
+        "mean": 0.9521052631578947,
+        "std": 0.03504488613651544
+      },
+      "f1_macro": {
+        "mean": 0.9520149583769608,
+        "std": 0.03525179806106197
+      }
+    },
+    "Linear SVM": {
+      "accuracy": {
+        "mean": 0.9520833333333334,
+        "std": 0.028412878535387206
+      },
+      "precision_macro": {
+        "mean": 0.9542352583776733,
+        "std": 0.027859040446463878
+      },
+      "recall_macro": {
+        "mean": 0.952,
+        "std": 0.028306592127890218
+      },
+      "f1_macro": {
+        "mean": 0.9515381766562012,
+        "std": 0.02867150617613108
+      }
+    }
+  },
+  "test_accuracy": 0.95,
+  "test_macro_precision": 0.9522274247491639,
+  "test_macro_recall": 0.95,
+  "test_macro_f1": 0.9502934924200946,
+  "test_weighted_precision": 0.9522274247491639,
+  "test_weighted_recall": 0.95,
+  "test_weighted_f1": 0.9502934924200948,
+  "classification_report": {
+    "Water": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 24.0
+    },
+    "Electricity": {
+      "precision": 0.9565217391304348,
+      "recall": 0.9166666666666666,
+      "f1-score": 0.9361702127659575,
+      "support": 24.0
+    },
+    "Road": {
+      "precision": 0.8846153846153846,
+      "recall": 0.9583333333333334,
+      "f1-score": 0.92,
+      "support": 24.0
+    },
+    "Garbage": {
+      "precision": 1.0,
+      "recall": 0.9166666666666666,
+      "f1-score": 0.9565217391304348,
+      "support": 24.0
+    },
+    "Others": {
+      "precision": 0.92,
+      "recall": 0.9583333333333334,
+      "f1-score": 0.9387755102040817,
+      "support": 24.0
+    },
+    "accuracy": 0.95,
+    "macro avg": {
+      "precision": 0.9522274247491639,
+      "recall": 0.95,
+      "f1-score": 0.9502934924200946,
+      "support": 120.0
+    },
+    "weighted avg": {
+      "precision": 0.9522274247491639,
+      "recall": 0.95,
+      "f1-score": 0.9502934924200948,
+      "support": 120.0
+    }
+  },
+  "train_test_text_overlap": 0
+}

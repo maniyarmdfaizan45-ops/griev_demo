@@ -29,6 +29,7 @@ export default function Dashboard() {
   const [category, setCategory] = useState('All');
   const [priority, setPriority] = useState('All');
   const [status, setStatus] = useState('All');
+  const [escalation, setEscalation] = useState('All');
   const [page, setPage] = useState(1);
   const limit = 5;
 
@@ -53,6 +54,7 @@ export default function Dashboard() {
         category,
         priority,
         status,
+        escalation,
         page,
         limit
       };
@@ -70,7 +72,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [search, category, priority, status, page, limit, selectedAIComplaint]);
+  }, [search, category, priority, status, escalation, page, limit, selectedAIComplaint]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -82,11 +84,11 @@ export default function Dashboard() {
     fetchDashboardData();
   };
 
-  const handleUpdateStatus = async (id, newStatus) => {
+  const handleUpdateStatus = async (id, newStatus, remark = '') => {
     setUpdatingId(id);
     setError('');
     try {
-      const response = await apiService.updateComplaintStatus(id, newStatus);
+      const response = await apiService.updateComplaintStatus(id, newStatus, remark);
       if (response.status === 'success') {
         await fetchDashboardData();
         // Update selected AI complaint reference if it is active
@@ -121,11 +123,50 @@ export default function Dashboard() {
     Low: '#16A34A'
   };
 
+  const DEPARTMENT_OPTIONS = [
+    'Water Supply Department',
+    'Electricity Department',
+    'Public Works Department',
+    'Sanitation/Waste Management Department',
+    'General/Public Grievance Department',
+  ];
+
+  const handleUpdateDepartment = async (id, department) => {
+    setUpdatingId(id);
+    setError('');
+    try {
+      const response = await apiService.updateComplaintDepartment(id, department);
+      if (response.status === 'success') await fetchDashboardData();
+    } catch (err) {
+      setError(err.message || 'Failed to update department.');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleEscalate = async (id) => {
+    const reason = window.prompt('Escalation reason is required:');
+    if (!reason || !reason.trim()) return;
+    setUpdatingId(id);
+    setError('');
+    try {
+      const response = await apiService.escalateComplaint(id, reason.trim());
+      if (response.status === 'success') await fetchDashboardData();
+    } catch (err) {
+      setError(err.message || 'Failed to escalate complaint.');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   const getStatusBadgeClass = (stat) => {
     const mapping = {
-      Pending: 'bg-orange-50 text-[#EA580C] border-orange-200',
-      'In Progress': 'bg-blue-50 text-[#1E40AF] border-blue-200',
-      Resolved: 'bg-green-50 text-[#16A34A] border-green-200',
+      SUBMITTED: 'bg-orange-50 text-[#EA580C] border-orange-200',
+      ASSIGNED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      IN_PROGRESS: 'bg-blue-50 text-[#1E40AF] border-blue-200',
+      RESOLVED: 'bg-green-50 text-[#16A34A] border-green-200',
+      CLOSED: 'bg-slate-100 text-slate-600 border-slate-200',
+      REOPENED: 'bg-amber-50 text-amber-700 border-amber-200',
     };
     return mapping[stat] || 'bg-slate-100 text-slate-600 border-slate-200';
   };
@@ -138,6 +179,21 @@ export default function Dashboard() {
     };
     return mapping[pri] || 'bg-slate-100 text-slate-600 border-slate-200';
   };
+
+  const getSlaBadgeClass = (slaStatus) => {
+    const mapping = {
+      WITHIN_SLA: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      NEAR_DEADLINE: 'bg-amber-50 text-amber-700 border-amber-200',
+      SLA_BREACHED: 'bg-rose-50 text-rose-700 border-rose-200',
+      RESOLVED_WITHIN_SLA: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      RESOLVED_AFTER_SLA: 'bg-rose-50 text-rose-700 border-rose-200',
+    };
+    return mapping[slaStatus] || 'bg-slate-100 text-slate-600 border-slate-200';
+  };
+
+  const getEscalationBadgeClass = (escalationStatus) => escalationStatus === 'ESCALATED'
+    ? 'bg-rose-50 text-rose-700 border-rose-200'
+    : 'bg-slate-100 text-slate-600 border-slate-200';
 
   const getCategoryBadgeClass = (cat) => {
     const mapping = {
@@ -392,7 +448,7 @@ export default function Dashboard() {
                     complaints.slice(0, 4).map((item) => (
                       <div key={item.id} className="py-2.5 flex items-center justify-between gap-4 text-xs">
                         <div className="min-w-0">
-                          <span className="font-mono font-bold text-slate-500">#{item.id.substring(0, 8)}</span>
+                          <span className="font-mono font-bold text-slate-500">{item.grievance_id || `#${item.id.substring(0, 8)}`}</span>
                           <p className="font-medium text-slate-700 truncate">{parseComplaintText(item.complaint_text).preview}</p>
                         </div>
                         <span className={`rounded border px-2 py-0.5 text-[9px] shrink-0 font-bold ${getStatusBadgeClass(item.status)}`}>
@@ -480,9 +536,17 @@ export default function Dashboard() {
               </select>
               <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 outline-none">
                 <option value="All">All Statuses</option>
-                <option value="Pending">Pending</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Resolved">Resolved</option>
+                <option value="SUBMITTED">Submitted</option>
+                <option value="ASSIGNED">Assigned</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="RESOLVED">Resolved</option>
+                <option value="CLOSED">Closed</option>
+                <option value="REOPENED">Reopened</option>
+              </select>
+              <select value={escalation} onChange={(e) => { setEscalation(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 outline-none">
+                <option value="All">All Escalations</option>
+                <option value="NOT_ESCALATED">Normal</option>
+                <option value="ESCALATED">Escalated</option>
               </select>
             </div>
 
@@ -496,6 +560,8 @@ export default function Dashboard() {
                     <th className="p-3">Grievance description</th>
                     <th className="p-3 w-28">Department</th>
                     <th className="p-3 w-24">Severity</th>
+                    <th className="p-3 w-28">SLA</th>
+                    <th className="p-3 w-24">Escalation</th>
                     <th className="p-3 w-24">Status</th>
                     <th className="p-3 w-36 text-center">Actions</th>
                   </tr>
@@ -509,7 +575,9 @@ export default function Dashboard() {
                         <td className="p-3 animate-pulse bg-slate-50"><div className="h-3 w-full bg-slate-200 rounded" /></td>
                         <td className="p-3 animate-pulse bg-slate-50"><div className="h-3 w-12 bg-slate-200 rounded" /></td>
                         <td className="p-3 animate-pulse bg-slate-50"><div className="h-3 w-12 bg-slate-200 rounded" /></td>
+                        <td className="p-3 animate-pulse bg-slate-50"><div className="h-3 w-16 bg-slate-200 rounded" /></td>
                         <td className="p-3 animate-pulse bg-slate-50"><div className="h-3.5 w-16 bg-slate-200 rounded" /></td>
+                        <td className="p-3 animate-pulse bg-slate-50"><div className="h-3 w-16 bg-slate-200 rounded" /></td>
                         <td className="p-3 animate-pulse bg-slate-50"><div className="h-6 w-full bg-slate-200 rounded" /></td>
                       </tr>
                     ))
@@ -517,22 +585,50 @@ export default function Dashboard() {
                     complaints.map((item) => (
                       <tr key={item.id} className="hover:bg-slate-50 bg-white">
                         <td className="p-3 pl-4 font-mono font-bold text-slate-500 select-all">
-                          #{item.id.substring(0, 8)}
+                          {item.grievance_id || `#${item.id.substring(0, 8)}`}
                         </td>
                         <td className="p-3 text-slate-600 whitespace-nowrap">
                           {new Date(item.timestamp).toLocaleDateString(undefined, { dateStyle: 'medium' })}
                         </td>
                         <td className="p-3 max-w-sm truncate text-slate-700">
                           {parseComplaintText(item.complaint_text).preview}
+                          {item.related_grievances?.length > 0 && (
+                            <span className="mt-1 block text-[9px] font-bold text-amber-700">
+                              Related: {item.related_grievances[0].related_grievance_id} ({item.related_grievances[0].similarity_score}%)
+                            </span>
+                          )}
                         </td>
                         <td className="p-3">
-                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-[#1E40AF]">
-                            {item.category}
-                          </span>
+                          <select
+                            value={item.department || ''}
+                            onChange={(event) => handleUpdateDepartment(item.id, event.target.value)}
+                            disabled={updatingId === item.id}
+                            className="max-w-[170px] rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-bold text-[#1E40AF] outline-none disabled:opacity-50"
+                            aria-label={`Department for complaint ${item.id}`}
+                          >
+                            {DEPARTMENT_OPTIONS.map((departmentOption) => (
+                              <option key={departmentOption} value={departmentOption}>{departmentOption}</option>
+                            ))}
+                          </select>
                         </td>
                         <td className="p-3">
                           <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${getPriorityBadgeClass(item.priority)}`}>
                             {item.priority}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <span className={`rounded border px-2 py-0.5 text-[9px] font-bold ${getSlaBadgeClass(item.sla_status)}`}>
+                            {item.sla_status}
+                          </span>
+                          {item.sla_deadline && (
+                            <span className="mt-1 block whitespace-nowrap text-[9px] text-slate-500">
+                              {new Date(item.sla_deadline).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <span className={`rounded border px-2 py-0.5 text-[9px] font-bold ${getEscalationBadgeClass(item.escalation_status)}`}>
+                            {item.escalation_status === 'ESCALATED' ? `Escalated L${item.escalation_level || 1}` : 'Normal'}
                           </span>
                         </td>
                         <td className="p-3">
@@ -542,37 +638,81 @@ export default function Dashboard() {
                         </td>
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
-                            {item.status === 'Pending' && (
+                            {item.status === 'SUBMITTED' && (
                               <>
                                 <button
-                                  onClick={() => handleUpdateStatus(item.id, 'In Progress')}
+                                  onClick={() => handleUpdateStatus(item.id, 'ASSIGNED')}
                                   disabled={updatingId === item.id}
                                   className="flex items-center gap-0.5 rounded bg-[#1E40AF] px-2 py-1 text-[9px] font-bold text-white hover:bg-[#16327e] disabled:opacity-40"
                                 >
-                                  <Play size={10} /> Start
-                                </button>
-                                <button
-                                  onClick={() => handleUpdateStatus(item.id, 'Resolved')}
-                                  disabled={updatingId === item.id}
-                                  className="flex items-center gap-0.5 rounded bg-[#16A34A] px-2 py-1 text-[9px] font-bold text-white hover:bg-[#13843f] disabled:opacity-40"
-                                >
-                                  <Check size={10} /> Resolve
+                                  <Play size={10} /> Assign
                                 </button>
                               </>
                             )}
-                            {item.status === 'In Progress' && (
+                            {item.status === 'ASSIGNED' && (
                               <button
-                                onClick={() => handleUpdateStatus(item.id, 'Resolved')}
+                                onClick={() => handleUpdateStatus(item.id, 'IN_PROGRESS')}
+                                disabled={updatingId === item.id}
+                                className="flex items-center gap-0.5 rounded bg-[#1E40AF] px-3 py-1 text-[9px] font-bold text-white hover:bg-[#16327e] disabled:opacity-40"
+                              >
+                                <Play size={10} /> Start Work
+                              </button>
+                            )}
+                            {item.status === 'IN_PROGRESS' && (
+                              <button
+                                onClick={() => {
+                                  const remark = window.prompt('Resolution remarks are required:');
+                                  if (remark && remark.trim()) handleUpdateStatus(item.id, 'RESOLVED', remark.trim());
+                                }}
                                 disabled={updatingId === item.id}
                                 className="flex items-center gap-0.5 rounded bg-[#16A34A] px-3 py-1 text-[9px] font-bold text-white hover:bg-[#13843f] disabled:opacity-40"
                               >
                                 <Check size={10} /> Resolve Ticket
                               </button>
                             )}
-                            {item.status === 'Resolved' && (
+                            {item.status === 'RESOLVED' && (
+                              <>
+                                <button
+                                  onClick={() => handleUpdateStatus(item.id, 'CLOSED')}
+                                  disabled={updatingId === item.id}
+                                  className="flex items-center gap-0.5 rounded bg-slate-600 px-3 py-1 text-[9px] font-bold text-white hover:bg-slate-700 disabled:opacity-40"
+                                >
+                                  <CheckCircle2 size={10} /> Close
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const remark = window.prompt('Reopening reason is required:');
+                                    if (remark && remark.trim()) handleUpdateStatus(item.id, 'REOPENED', remark.trim());
+                                  }}
+                                  disabled={updatingId === item.id}
+                                  className="flex items-center gap-0.5 rounded bg-amber-600 px-2 py-1 text-[9px] font-bold text-white hover:bg-amber-700 disabled:opacity-40"
+                                >
+                                  Reopen
+                                </button>
+                              </>
+                            )}
+                            {item.status === 'CLOSED' && (
                               <span className="flex items-center gap-0.5 text-[9px] font-bold italic text-slate-500">
-                                <CheckCircle2 size={11} className="text-[#16A34A]" /> Completed
+                                <CheckCircle2 size={11} className="text-slate-500" /> Closed
                               </span>
+                            )}
+                            {item.status === 'REOPENED' && (
+                              <button
+                                onClick={() => handleUpdateStatus(item.id, 'IN_PROGRESS')}
+                                disabled={updatingId === item.id}
+                                className="flex items-center gap-0.5 rounded bg-[#1E40AF] px-3 py-1 text-[9px] font-bold text-white hover:bg-[#16327e] disabled:opacity-40"
+                              >
+                                <Play size={10} /> Resume Work
+                              </button>
+                            )}
+                            {item.escalation_status !== 'ESCALATED' && item.status !== 'RESOLVED' && item.status !== 'CLOSED' && (
+                              <button
+                                onClick={() => handleEscalate(item.id)}
+                                disabled={updatingId === item.id}
+                                className="flex items-center gap-0.5 rounded bg-rose-600 px-2 py-1 text-[9px] font-bold text-white hover:bg-rose-700 disabled:opacity-40"
+                              >
+                                Escalate
+                              </button>
                             )}
                           </div>
                         </td>
@@ -580,7 +720,7 @@ export default function Dashboard() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="p-12 text-center text-slate-500">
+                      <td colSpan={9} className="p-12 text-center text-slate-500">
                         <div className="flex flex-col items-center gap-2">
                           <Inbox size={32} className="text-slate-300" />
                           <span>No grievances found in active backlog.</span>
@@ -674,7 +814,7 @@ export default function Dashboard() {
                       }`}
                     >
                       <div className="min-w-0">
-                        <span className="font-mono font-bold text-slate-500">#{item.id.substring(0, 8)}</span>
+                        <span className="font-mono font-bold text-slate-500">{item.grievance_id || `#${item.id.substring(0, 8)}`}</span>
                         <p className="font-medium text-slate-700 truncate">{parseComplaintText(item.complaint_text).preview}</p>
                       </div>
                       <span className={`text-[8px] font-bold rounded border px-1.5 py-0.5 shrink-0 ${getPriorityBadgeClass(item.priority)}`}>
@@ -698,7 +838,7 @@ export default function Dashboard() {
                 <div className="mt-4 space-y-5 text-xs">
                   <div>
                     <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Reference ID</span>
-                    <span className="font-mono text-xs font-bold text-slate-600">{selectedAIComplaint.id}</span>
+                    <span className="font-mono text-xs font-bold text-slate-600">{selectedAIComplaint.grievance_id || selectedAIComplaint.id}</span>
                   </div>
 
                   <div>

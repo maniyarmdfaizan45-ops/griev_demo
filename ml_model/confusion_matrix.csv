@@ -1,0 +1,6 @@
+actual\predicted,Water,Electricity,Road,Garbage,Others
+Water,24,0,0,0,0
+Electricity,0,22,2,0,0
+Road,0,1,23,0,0
+Garbage,0,0,0,22,2
+Others,0,0,1,0,23

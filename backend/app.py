@@ -10,6 +10,8 @@ load_dotenv()
 from database import GrievanceDB
 from classifier import ComplaintClassifier
 from auth import encode_auth_token, token_required
+from departments import get_department_for_category, DEPARTMENTS
+from similarity import find_related_complaints
 
 app = Flask(__name__)
 # Enable CORS for frontend cross-origin requests
@@ -29,7 +31,7 @@ def root():
     return jsonify({
         "status": "ok",
         "message": "GrievanceAI backend is running. Use /health or /api/* endpoints.",
-        "routes": ["/health", "/api/auth/login", "/api/predict", "/api/submit-complaint", "/api/get-complaints"]
+        "routes": ["/health", "/api/auth/login", "/api/predict", "/api/submit-complaint", "/api/get-complaints", "/api/get-complaints/by-grievance-id/<grievance_id>"]
     }), 200
 
 @app.route('/health', methods=['GET'])
@@ -93,6 +95,7 @@ def predict():
         }), 400
         
     analysis = classifier.get_full_analysis(text)
+    analysis["department"] = get_department_for_category(analysis["category"])
     
     return jsonify({
         "status": "success",
@@ -130,18 +133,35 @@ def submit_complaint():
         category = category or analysis["category"]
         priority = priority or analysis["priority"]
         sentiment_score = sentiment_score if sentiment_score is not None else analysis["sentiment_score"]
+
+    department = get_department_for_category(category)
+    if department not in DEPARTMENTS:
+        return jsonify({
+            "status": "error",
+            "message": f"Unknown department: {department}"
+        }), 400
         
     try:
         saved_complaint = db.insert_complaint(
             text=text,
             category=category,
             priority=priority,
-            sentiment_score=sentiment_score
+            sentiment_score=sentiment_score,
+            department=department,
         )
+        related_grievances = find_related_complaints(
+            text,
+            category,
+            department,
+            db.get_active_complaints(exclude_id=saved_complaint["id"]),
+        )
+        saved_complaint = db.save_related_grievances(saved_complaint["id"], related_grievances)
         return jsonify({
             "status": "success",
             "message": "Complaint submitted successfully",
-            "complaint": saved_complaint
+            "complaint": saved_complaint,
+            "possible_duplicate": bool(related_grievances),
+            "related_grievances": related_grievances,
         }), 201
     except Exception as e:
         return jsonify({
@@ -158,6 +178,7 @@ def get_complaints():
     category = request.args.get('category', 'All')
     priority = request.args.get('priority', 'All')
     status = request.args.get('status', 'All')
+    escalation = request.args.get('escalation', 'All')
     
     try:
         page = int(request.args.get('page', 1))
@@ -173,6 +194,7 @@ def get_complaints():
         category=category,
         priority=priority,
         status=status,
+        escalation=escalation,
         page=page,
         limit=limit
     )
@@ -184,6 +206,50 @@ def get_complaints():
         "page": page,
         "limit": limit
     }), 200
+
+@app.route('/api/get-complaints/by-grievance-id/<grievance_id>', methods=['GET'])
+def get_complaint_by_grievance_id(grievance_id):
+    complaint = db.get_complaint_by_grievance_id(grievance_id.strip().upper())
+    if not complaint:
+        return jsonify({
+            "status": "error",
+            "message": f"Grievance {grievance_id} not found"
+        }), 404
+    return jsonify({
+        "status": "success",
+        "complaint": complaint,
+        "history": db.get_status_history(complaint["id"]),
+    }), 200
+
+@app.route('/api/update-department/<complaint_id>', methods=['PUT'])
+@token_required
+def update_department(complaint_id):
+    """Admin-only route for manually overriding automatic department routing."""
+    data = request.get_json()
+    if not data or not data.get('department'):
+        return jsonify({
+            "status": "error",
+            "message": "Department is required"
+        }), 400
+
+    try:
+        updated_complaint = db.update_department(
+            complaint_id,
+            data['department'],
+            changed_by=request.current_user,
+        )
+        if not updated_complaint:
+            return jsonify({
+                "status": "error",
+                "message": f"Complaint with ID {complaint_id} not found"
+            }), 404
+        return jsonify({
+            "status": "success",
+            "message": "Department updated successfully",
+            "complaint": updated_complaint,
+        }), 200
+    except ValueError as error:
+        return jsonify({"status": "error", "message": str(error)}), 400
 
 @app.route('/api/update-status/<complaint_id>', methods=['PUT'])
 @token_required
@@ -199,13 +265,21 @@ def update_status(complaint_id):
         }), 400
         
     new_status = data.get('status')
+    remark = data.get('remark')
     
     try:
-        success = db.update_status(complaint_id, new_status)
-        if success:
+        updated_complaint = db.update_status(
+            complaint_id,
+            new_status,
+            changed_by=request.current_user,
+            remark=remark,
+        )
+        if updated_complaint:
             return jsonify({
                 "status": "success",
-                "message": f"Complaint status updated successfully to: {new_status}"
+                "message": f"Complaint status updated successfully to: {updated_complaint['status']}",
+                "complaint": updated_complaint,
+                "history": db.get_status_history(complaint_id),
             }), 200
         else:
             return jsonify({
@@ -222,6 +296,46 @@ def update_status(complaint_id):
             "status": "error",
             "message": f"Update failed: {str(e)}"
         }), 500
+
+@app.route('/api/escalate/<complaint_id>', methods=['POST'])
+@token_required
+def escalate_complaint(complaint_id):
+    """Admin-only manual department escalation."""
+    data = request.get_json() or {}
+    try:
+        complaint = db.manually_escalate(
+            complaint_id,
+            data.get('reason'),
+            changed_by=request.current_user,
+        )
+        if not complaint:
+            return jsonify({
+                "status": "error",
+                "message": f"Complaint with ID {complaint_id} not found"
+            }), 404
+        return jsonify({
+            "status": "success",
+            "message": "Complaint escalated successfully",
+            "complaint": complaint,
+            "history": db.get_status_history(complaint_id),
+        }), 200
+    except ValueError as error:
+        return jsonify({"status": "error", "message": str(error)}), 400
+
+@app.route('/api/get-complaints/<complaint_id>/history', methods=['GET'])
+def get_complaint_history(complaint_id):
+    """Return the citizen-visible status timeline for a complaint."""
+    complaint = db.get_complaint(complaint_id)
+    if not complaint:
+        return jsonify({
+            "status": "error",
+            "message": f"Complaint with ID {complaint_id} not found"
+        }), 404
+    return jsonify({
+        "status": "success",
+        "complaint_id": complaint_id,
+        "history": db.get_status_history(complaint_id),
+    }), 200
 
 @app.route('/api/dashboard-stats', methods=['GET'])
 @token_required

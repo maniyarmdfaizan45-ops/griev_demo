@@ -12,6 +12,7 @@ export default function History() {
   // Search for tracking
   const [trackId, setTrackId] = useState('');
   const [trackedGrievance, setTrackedGrievance] = useState(null);
+  const [statusHistory, setStatusHistory] = useState([]);
   const [trackSearched, setTrackSearched] = useState(false);
 
   // Search & filters for ledger
@@ -64,35 +65,54 @@ export default function History() {
     setPage(1);
   };
 
-  const handleTrackSubmit = (e) => {
+  const handleTrackSubmit = async (e) => {
     e.preventDefault();
     setTrackSearched(true);
     setError('');
     
     if (!trackId.trim()) {
       setTrackedGrievance(null);
+      setStatusHistory([]);
       return;
     }
 
-    // Attempt to match within current complaints list first
-    const cleanTrackId = trackId.trim().toLowerCase();
-    const found = complaints.find(
-      (c) => c.id.toLowerCase() === cleanTrackId || c.id.toLowerCase().startsWith(cleanTrackId)
-    );
+    const cleanTrackId = trackId.trim().toUpperCase();
+    try {
+      const response = await apiService.getComplaintByGrievanceId(cleanTrackId);
+      setTrackedGrievance(response.complaint);
+      setStatusHistory(response.history || []);
+      return;
+    } catch {
+      // Keep legacy internal-ID tracking usable while public IDs roll out.
+    }
 
+    const found = complaints.find(
+      (c) => c.id.toLowerCase() === cleanTrackId.toLowerCase() || c.id.toLowerCase().startsWith(cleanTrackId.toLowerCase())
+    );
     if (found) {
       setTrackedGrievance(found);
+      try {
+        const historyResponse = await apiService.getComplaintHistory(found.id);
+        setStatusHistory(historyResponse.history || []);
+      } catch (err) {
+        setStatusHistory([]);
+        setError(err.message || 'Failed to fetch grievance history.');
+      }
     } else {
       setTrackedGrievance(null);
+      setStatusHistory([]);
       setError('No grievance found matching this Reference ID. Please verify the ID and try again.');
     }
   };
 
   const getStatusBadgeClass = (stat) => {
     const mapping = {
-      Pending: 'bg-orange-50 text-[#EA580C] border-orange-200',
-      'In Progress': 'bg-blue-50 text-[#1E40AF] border-blue-200',
-      Resolved: 'bg-green-50 text-[#16A34A] border-green-200',
+      SUBMITTED: 'bg-orange-50 text-[#EA580C] border-orange-200',
+      ASSIGNED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      IN_PROGRESS: 'bg-blue-50 text-[#1E40AF] border-blue-200',
+      RESOLVED: 'bg-green-50 text-[#16A34A] border-green-200',
+      CLOSED: 'bg-slate-100 text-slate-600 border-slate-200',
+      REOPENED: 'bg-amber-50 text-amber-700 border-amber-200',
     };
     return mapping[stat] || 'bg-slate-100 text-slate-600 border-slate-200';
   };
@@ -106,34 +126,38 @@ export default function History() {
     return mapping[pri] || 'bg-slate-100 text-slate-600 border-slate-200';
   };
 
-  // Stepper timeline mapping helper
+  const getSlaLabel = (slaStatus) => ({
+    WITHIN_SLA: 'Within Deadline',
+    NEAR_DEADLINE: 'Near Deadline',
+    SLA_BREACHED: 'SLA Breached',
+    RESOLVED_WITHIN_SLA: 'Resolved Within SLA',
+    RESOLVED_AFTER_SLA: 'Resolved After SLA',
+  }[slaStatus] || slaStatus || 'Unavailable');
+
+  const getEscalationLabel = (escalationStatus) => escalationStatus === 'ESCALATED'
+    ? 'Escalated'
+    : 'Normal';
+
   const getTimelineSteps = (ticketStatus) => {
-    // Steps: Submitted -> Under Review -> Assigned -> In Progress -> Resolved
-    // DB status can be "Pending", "In Progress", "Resolved"
     const steps = [
       { name: 'Submitted', desc: 'Grievance recorded' },
-      { name: 'Under Review', desc: 'AI auto-routing analysis' },
       { name: 'Assigned', desc: 'Allocated to department' },
       { name: 'In Progress', desc: 'Officers resolving issue' },
-      { name: 'Resolved', desc: 'Action completed' }
+      { name: 'Resolved', desc: 'Action completed' },
+      { name: 'Closed', desc: 'Grievance closed' }
     ];
-
-    if (ticketStatus === 'Resolved') {
-      return steps.map(s => ({ ...s, state: 'complete' }));
-    }
-    if (ticketStatus === 'In Progress') {
-      return steps.map((s, idx) => {
-        if (idx < 3) return { ...s, state: 'complete' };
-        if (idx === 3) return { ...s, state: 'active' };
-        return { ...s, state: 'upcoming' };
-      });
-    }
-    // Pending
-    return steps.map((s, idx) => {
-      if (idx < 2) return { ...s, state: 'complete' };
-      if (idx === 2) return { ...s, state: 'active' };
-      return { ...s, state: 'upcoming' };
-    });
+    const stepIndex = {
+      SUBMITTED: 0,
+      ASSIGNED: 1,
+      IN_PROGRESS: 2,
+      REOPENED: 2,
+      RESOLVED: 3,
+      CLOSED: 4,
+    }[ticketStatus] ?? 0;
+    return steps.map((step, index) => ({
+      ...step,
+      state: index < stepIndex ? 'complete' : index === stepIndex ? 'active' : 'upcoming',
+    }));
   };
 
   const totalPages = Math.ceil(total / limit) || 1;
@@ -208,7 +232,7 @@ export default function History() {
               <div className="relative flex-1">
                 <input
                   type="text"
-                  placeholder="Enter Ref ID (e.g. 5da9b794...)"
+                  placeholder="Enter Grievance ID (e.g. GRV-2026-000001)"
                   value={trackId}
                   onChange={(e) => setTrackId(e.target.value)}
                   className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white font-mono"
@@ -271,6 +295,25 @@ export default function History() {
                 </div>
               </div>
 
+              <div className="border-t border-slate-200 pt-6">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">Status History</h4>
+                <div className="space-y-3">
+                  {statusHistory.map((event) => (
+                    <div key={`${event.changed_at}-${event.new_status}`} className="flex items-start gap-3 text-xs">
+                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#1E40AF]" />
+                      <div>
+                        <p className="font-bold text-slate-800">{event.new_status}</p>
+                        <p className="text-slate-500">
+                          {new Date(event.changed_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                          {' '}by {event.changed_by}
+                        </p>
+                        {event.remark && <p className="mt-0.5 text-slate-600">{event.remark}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Grievance Info Grid */}
               <div className="border-t border-slate-200 pt-6">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">Grievance Information Details</h4>
@@ -278,11 +321,11 @@ export default function History() {
                   <div className="space-y-4">
                     <div>
                       <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Reference ID</span>
-                      <span className="font-mono text-xs font-bold text-slate-900">{trackedGrievance.id}</span>
+                      <span className="font-mono text-xs font-bold text-slate-900">{trackedGrievance.grievance_id || trackedGrievance.id}</span>
                     </div>
                     <div>
                       <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned Department</span>
-                      <span className="text-xs font-bold text-[#1E40AF]">{trackedGrievance.category}</span>
+                      <span className="text-xs font-bold text-[#1E40AF]">{trackedGrievance.department || trackedGrievance.category}</span>
                     </div>
                     <div>
                       <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Grievance Description Details</span>
@@ -310,6 +353,22 @@ export default function History() {
                       <span className={`mt-1 inline-flex rounded border px-2.5 py-0.5 text-[10px] font-bold ${getPriorityBadgeClass(trackedGrievance.priority)}`}>
                         {trackedGrievance.priority} Severity
                       </span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Expected Resolution</span>
+                      <span className="text-xs font-semibold text-slate-700">
+                        {trackedGrievance.sla_deadline
+                          ? new Date(trackedGrievance.sla_deadline).toLocaleString(undefined, { dateStyle: 'long', timeStyle: 'short' })
+                          : 'Unavailable'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">SLA Status</span>
+                      <span className="text-xs font-semibold text-slate-700">{getSlaLabel(trackedGrievance.sla_status)}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Escalation</span>
+                      <span className="text-xs font-semibold text-slate-700">{getEscalationLabel(trackedGrievance.escalation_status)}</span>
                     </div>
                     
                     {parseComplaintText(trackedGrievance.complaint_text).isConsolidated && (
@@ -383,9 +442,12 @@ export default function History() {
                 <span>Status:</span>
                 <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs outline-none focus:border-[#1E40AF]">
                   <option value="All">All Statuses</option>
-                  <option value="Pending">Pending</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Resolved">Resolved</option>
+                  <option value="SUBMITTED">Submitted</option>
+                  <option value="ASSIGNED">Assigned</option>
+                  <option value="IN_PROGRESS">In Progress</option>
+                  <option value="RESOLVED">Resolved</option>
+                  <option value="CLOSED">Closed</option>
+                  <option value="REOPENED">Reopened</option>
                 </select>
               </div>
             </div>
@@ -428,7 +490,7 @@ export default function History() {
                     complaints.map((item) => (
                       <tr key={item.id} className="transition hover:bg-slate-50">
                         <td className="p-3.5 pl-5 font-mono font-bold text-slate-500 select-all">
-                          #{item.id.substring(0, 8)}
+                          {item.grievance_id || `#${item.id.substring(0, 8)}`}
                         </td>
                         <td className="p-3.5 whitespace-nowrap text-slate-600">
                           {new Date(item.timestamp).toLocaleDateString(undefined, { dateStyle: 'medium' })}
@@ -438,7 +500,7 @@ export default function History() {
                         </td>
                         <td className="p-3.5">
                           <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-[#1E40AF]">
-                            {item.category}
+                            {item.department || item.category}
                           </span>
                         </td>
                         <td className="p-3.5">
@@ -448,7 +510,7 @@ export default function History() {
                         </td>
                         <td className="p-3.5">
                           <span className={`inline-flex items-center gap-1 rounded border px-2.5 py-0.5 text-[10px] font-bold ${getStatusBadgeClass(item.status)}`}>
-                            {item.status === 'Resolved' && <ShieldCheck size={11} />}
+                            {(item.status === 'RESOLVED' || item.status === 'CLOSED') && <ShieldCheck size={11} />}
                             {item.status}
                           </span>
                         </td>

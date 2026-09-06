@@ -207,17 +207,28 @@ export default function SubmitComplaint() {
               <div className="mt-4 grid gap-4 rounded border border-emerald-200 bg-white p-4 text-xs md:grid-cols-3">
                 <div>
                   <span className="block text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Reference ID</span>
-                  <span className="font-mono font-bold text-slate-900 select-all">{success.id}</span>
+                  <span className="font-mono font-bold text-slate-900 select-all">{success.grievance_id || success.id}</span>
                 </div>
                 <div>
                   <span className="block text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Assigned Department</span>
-                  <span className="font-bold text-[#1E40AF]">{success.category}</span>
+                  <span className="font-bold text-[#1E40AF]">{success.department || success.category}</span>
                 </div>
                 <div>
                   <span className="block text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Initial Priority</span>
                   <span className="font-bold text-[#DC2626]">{success.priority}</span>
                 </div>
               </div>
+              {success.related_grievances?.length > 0 && (
+                <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+                  <p className="font-bold">Possible related grievance</p>
+                  {success.related_grievances.map((related) => (
+                    <p key={related.related_grievance_id} className="mt-1">
+                      {related.related_grievance_id} · {related.similarity_score}% similar · {related.category} · {related.status}
+                    </p>
+                  ))}
+                  <p className="mt-2 text-[10px] text-amber-700">This is a recommendation for administrative review. Your grievance was still created normally.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -402,7 +413,7 @@ export default function SubmitComplaint() {
               <div className="rounded border border-slate-200 bg-white p-3">
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Predicted Department</span>
                 <span className={`mt-1.5 inline-flex rounded border px-2 py-0.5 text-[10px] font-bold ${getCategoryBadgeClass(prediction.category)}`}>
-                  {prediction.category}
+                  {prediction.department || prediction.category}
                 </span>
               </div>
               <div className="rounded border border-slate-200 bg-white p-3">

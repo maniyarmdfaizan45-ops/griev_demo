@@ -68,10 +68,26 @@ export const apiService = {
   getComplaints: (params) => {
     return apiClient.get('/get-complaints', { params });
   },
+
+  getComplaintByGrievanceId: (grievanceId) => {
+    return apiClient.get(`/get-complaints/by-grievance-id/${encodeURIComponent(grievanceId)}`);
+  },
+
+  getComplaintHistory: (id) => {
+    return apiClient.get(`/get-complaints/${id}/history`);
+  },
   
   // Admin: Update complaint status
-  updateComplaintStatus: (id, status) => {
-    return apiClient.put(`/update-status/${id}`, { status });
+  updateComplaintStatus: (id, status, remark) => {
+    return apiClient.put(`/update-status/${id}`, { status, remark });
+  },
+
+  updateComplaintDepartment: (id, department) => {
+    return apiClient.put(`/update-department/${id}`, { department });
+  },
+
+  escalateComplaint: (id, reason) => {
+    return apiClient.post(`/escalate/${id}`, { reason });
   },
   
   // Admin: Fetch stats for charts
