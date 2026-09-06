@@ -88,6 +88,8 @@ class GrievanceDB:
                     )
                 self._backfill_mongo_grievance_ids()
                 self._backfill_mongo_sla()
+                self.mongo_db.notifications.create_index("recipient")
+                self.mongo_db.notifications.create_index("event_key", unique=True, sparse=True)
                 self.db_type = 'mongodb'
                 print(f"[INFO] Connected to MongoDB database: {db_name}")
                 return
@@ -215,6 +217,23 @@ class GrievanceDB:
                 SELECT 1 FROM status_history h WHERE h.complaint_id = c.id
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id TEXT PRIMARY KEY,
+                recipient TEXT NOT NULL,
+                grievance_id TEXT,
+                complaint_id TEXT,
+                notification_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                event_key TEXT UNIQUE,
+                metadata TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications(event_key)")
         conn.commit()
         conn.close()
 
@@ -390,7 +409,6 @@ class GrievanceDB:
                 "remark": "Complaint submitted",
                 "event_type": "STATUS",
             })
-            return self._with_sla_data(complaint_data)
         else:
             conn = sqlite3.connect(self.sqlite_path)
             cursor = conn.cursor()
@@ -411,7 +429,32 @@ class GrievanceDB:
             """, (complaint_id, None, "SUBMITTED", "citizen", timestamp, "Complaint submitted"))
             conn.commit()
             conn.close()
-            return self._with_sla_data(complaint_data)
+
+        # Create notifications for submission
+        self.create_notification(
+            recipient=grievance_id,
+            notification_type="COMPLAINT_SUBMITTED",
+            title="Complaint Submitted",
+            message=f"Your complaint {grievance_id} has been submitted successfully in category '{category}'.",
+            grievance_id=grievance_id,
+            complaint_id=complaint_id,
+            event_key=f"submit:{complaint_id}:{grievance_id}",
+            metadata={"category": category, "priority": priority, "department": department},
+            created_at=timestamp,
+        )
+        self.create_notification(
+            recipient="admin",
+            notification_type="NEW_COMPLAINT_SUBMITTED",
+            title="New Grievance Submitted",
+            message=f"New grievance {grievance_id} submitted in category '{category}' with {priority} priority.",
+            grievance_id=grievance_id,
+            complaint_id=complaint_id,
+            event_key=f"submit:{complaint_id}:admin",
+            metadata={"category": category, "priority": priority, "department": department},
+            created_at=timestamp,
+        )
+
+        return self._with_sla_data(complaint_data)
 
     def _with_sla_data(self, complaint):
         deadline = complaint.get("sla_deadline")
@@ -440,6 +483,29 @@ class GrievanceDB:
                 related = []
         complaint["related_grievances"] = related
         complaint["possible_duplicate"] = bool(complaint.get("possible_duplicate")) or bool(related)
+
+        # Trigger SLA notifications if SLA is approaching or breached
+        sla_st = complaint.get("sla_status")
+        grievance_id = complaint.get("grievance_id")
+        if sla_st in {"NEAR_DEADLINE", "SLA_BREACHED"} and grievance_id:
+            notif_type = "SLA_APPROACHING" if sla_st == "NEAR_DEADLINE" else "SLA_BREACHED"
+            title = "SLA Deadline Approaching" if sla_st == "NEAR_DEADLINE" else "SLA Breached"
+            msg = (
+                f"Grievance {grievance_id} is approaching its SLA resolution deadline."
+                if sla_st == "NEAR_DEADLINE"
+                else f"Grievance {grievance_id} has breached its resolution SLA deadline."
+            )
+            self.create_notification(
+                recipient="admin",
+                notification_type=notif_type,
+                title=title,
+                message=msg,
+                grievance_id=grievance_id,
+                complaint_id=complaint["id"],
+                event_key=f"sla:{complaint['id']}:{sla_st}:admin",
+                metadata={"sla_status": sla_st, "deadline": deadline},
+            )
+
         return complaint
 
     def get_active_complaints(self, limit=250, exclude_id=None):
@@ -516,6 +582,32 @@ class GrievanceDB:
             "escalated_at": escalated_at,
             "escalation_reason": ESCALATION_REASON_SLA_BREACHED,
         })
+
+        # Escalation notifications
+        grievance_id = complaint.get("grievance_id")
+        if grievance_id:
+            self.create_notification(
+                recipient=grievance_id,
+                notification_type="COMPLAINT_ESCALATED",
+                title="Grievance Escalated",
+                message=f"Your complaint {grievance_id} has been escalated for priority resolution.",
+                grievance_id=grievance_id,
+                complaint_id=complaint["id"],
+                event_key=f"escalation:{complaint['id']}:{grievance_id}",
+                metadata={"escalation_reason": ESCALATION_REASON_SLA_BREACHED},
+                created_at=escalated_at,
+            )
+        self.create_notification(
+            recipient="admin",
+            notification_type="COMPLAINT_ESCALATED",
+            title="Complaint Escalated",
+            message=f"Grievance {grievance_id or complaint['id']} escalated due to: {ESCALATION_REASON_SLA_BREACHED}.",
+            grievance_id=grievance_id,
+            complaint_id=complaint["id"],
+            event_key=f"escalation:{complaint['id']}:admin",
+            metadata={"escalation_reason": ESCALATION_REASON_SLA_BREACHED},
+            created_at=escalated_at,
+        )
 
     def get_complaints(self, search_query=None, category=None, priority=None, status=None, escalation=None, page=1, limit=10):
         # Calculate pagination skip
@@ -769,7 +861,47 @@ class GrievanceDB:
             conn.commit()
             conn.close()
 
-        return self.get_complaint(complaint_id)
+        updated_complaint = self.get_complaint(complaint_id)
+        grievance_id = updated_complaint.get("grievance_id") if updated_complaint else None
+
+        if normalized_status == "RESOLVED":
+            cit_type, cit_title, cit_msg = "COMPLAINT_RESOLVED", "Grievance Resolved", f"Your complaint {grievance_id} has been resolved."
+            adm_type, adm_title, adm_msg = "COMPLAINT_RESOLVED", "Complaint Resolved", f"Grievance {grievance_id} was resolved."
+        elif normalized_status == "REOPENED":
+            cit_type, cit_title, cit_msg = "COMPLAINT_REOPENED", "Grievance Reopened", f"Your complaint {grievance_id} has been reopened."
+            adm_type, adm_title, adm_msg = "COMPLAINT_REOPENED", "Complaint Reopened", f"Grievance {grievance_id} has been reopened by citizen."
+        elif normalized_status == "ASSIGNED":
+            cit_type, cit_title, cit_msg = "COMPLAINT_ASSIGNED", "Grievance Assigned", f"Your complaint {grievance_id} has been assigned."
+            adm_type, adm_title, adm_msg = "COMPLAINT_ASSIGNED", "Complaint Assigned", f"Grievance {grievance_id} assigned."
+        else:
+            cit_type, cit_title, cit_msg = "STATUS_CHANGED", "Status Updated", f"Your complaint {grievance_id} status updated to {normalized_status}."
+            adm_type, adm_title, adm_msg = "STATUS_CHANGED", "Status Updated", f"Grievance {grievance_id} status updated to {normalized_status}."
+
+        if grievance_id:
+            self.create_notification(
+                recipient=grievance_id,
+                notification_type=cit_type,
+                title=cit_title,
+                message=cit_msg,
+                grievance_id=grievance_id,
+                complaint_id=complaint_id,
+                event_key=f"status:{complaint_id}:{normalized_status}:{grievance_id}",
+                metadata={"status": normalized_status, "remark": remark, "changed_by": changed_by},
+                created_at=changed_at,
+            )
+        self.create_notification(
+            recipient="admin",
+            notification_type=adm_type,
+            title=adm_title,
+            message=adm_msg,
+            grievance_id=grievance_id,
+            complaint_id=complaint_id,
+            event_key=f"status:{complaint_id}:{normalized_status}:admin",
+            metadata={"status": normalized_status, "remark": remark, "changed_by": changed_by},
+            created_at=changed_at,
+        )
+
+        return updated_complaint
 
     def get_status_history(self, complaint_id):
         if self.db_type == 'mongodb':
@@ -833,6 +965,30 @@ class GrievanceDB:
             conn.commit()
             conn.close()
         complaint.update(fields)
+        grievance_id = complaint.get("grievance_id")
+        if grievance_id:
+            self.create_notification(
+                recipient=grievance_id,
+                notification_type="COMPLAINT_ESCALATED",
+                title="Grievance Escalated",
+                message=f"Your complaint {grievance_id} has been escalated for priority resolution.",
+                grievance_id=grievance_id,
+                complaint_id=complaint_id,
+                event_key=f"escalation:{complaint_id}:{grievance_id}",
+                metadata={"escalation_reason": reason},
+                created_at=escalated_at,
+            )
+        self.create_notification(
+            recipient="admin",
+            notification_type="COMPLAINT_ESCALATED",
+            title="Complaint Escalated",
+            message=f"Grievance {grievance_id or complaint_id} escalated due to: {reason}.",
+            grievance_id=grievance_id,
+            complaint_id=complaint_id,
+            event_key=f"escalation:{complaint_id}:admin",
+            metadata={"escalation_reason": reason},
+            created_at=escalated_at,
+        )
         return complaint
 
     def update_department(self, complaint_id, department, changed_by):
@@ -854,7 +1010,31 @@ class GrievanceDB:
             )
             conn.commit()
             conn.close()
-        return self.get_complaint(complaint_id)
+
+        updated_complaint = self.get_complaint(complaint_id)
+        grievance_id = updated_complaint.get("grievance_id") if updated_complaint else None
+        if grievance_id:
+            self.create_notification(
+                recipient=grievance_id,
+                notification_type="COMPLAINT_ASSIGNED",
+                title="Department Assigned",
+                message=f"Your complaint {grievance_id} has been assigned to department: {department}.",
+                grievance_id=grievance_id,
+                complaint_id=complaint_id,
+                event_key=f"dept:{complaint_id}:{department}:{grievance_id}",
+                metadata={"department": department, "changed_by": changed_by},
+            )
+        self.create_notification(
+            recipient="admin",
+            notification_type="COMPLAINT_ASSIGNED",
+            title="Complaint Routed",
+            message=f"Grievance {grievance_id or complaint_id} routed to department: {department}.",
+            grievance_id=grievance_id,
+            complaint_id=complaint_id,
+            event_key=f"dept:{complaint_id}:{department}:admin",
+            metadata={"department": department, "changed_by": changed_by},
+        )
+        return updated_complaint
 
     def get_dashboard_stats(self):
         if self.db_type == 'mongodb':
@@ -939,3 +1119,171 @@ class GrievanceDB:
             "priority_distribution": priority_counts,
             "trend_data": trend_data
         }
+
+    # ==================== NOTIFICATIONS ENGINE ====================
+
+    def _format_notification(self, doc):
+        if not doc:
+            return None
+        d = dict(doc)
+        d["id"] = str(d.get("id") or d.get("_id"))
+        d["is_read"] = bool(d.get("is_read"))
+        metadata = d.get("metadata", "{}")
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except Exception:
+                metadata = {}
+        d["metadata"] = metadata
+        d.pop("_id", None)
+        return d
+
+    def get_notification_by_event_key(self, event_key):
+        if not event_key:
+            return None
+        if self.db_type == 'mongodb':
+            doc = self.mongo_db.notifications.find_one({"event_key": event_key})
+            return self._format_notification(doc) if doc else None
+        else:
+            conn = sqlite3.connect(self.sqlite_path)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM notifications WHERE event_key = ?", (event_key,)).fetchone()
+            conn.close()
+            return self._format_notification(dict(row)) if row else None
+
+    def create_notification(self, recipient, notification_type, title, message, grievance_id=None, complaint_id=None, event_key=None, metadata=None, created_at=None):
+        if not recipient or not notification_type or not title or not message:
+            return None
+
+        timestamp = created_at or (datetime.utcnow().isoformat() + "Z")
+
+        # Idempotency check: prevent duplicate notifications for the same event key
+        if event_key:
+            existing = self.get_notification_by_event_key(event_key)
+            if existing:
+                return existing
+
+        notification_id = str(uuid.uuid4())
+        metadata_json = json.dumps(metadata) if isinstance(metadata, (dict, list)) else (metadata or "{}")
+
+        notification_data = {
+            "id": notification_id,
+            "recipient": recipient,
+            "grievance_id": grievance_id,
+            "complaint_id": complaint_id,
+            "notification_type": notification_type,
+            "title": title,
+            "message": message,
+            "created_at": timestamp,
+            "is_read": 0,
+            "event_key": event_key,
+            "metadata": metadata_json,
+        }
+
+        if self.db_type == 'mongodb':
+            mongo_data = notification_data.copy()
+            mongo_data["_id"] = notification_id
+            try:
+                self.mongo_db.notifications.insert_one(mongo_data)
+            except Exception:
+                if event_key:
+                    return self.get_notification_by_event_key(event_key)
+                return None
+            return self._format_notification(notification_data)
+        else:
+            conn = sqlite3.connect(self.sqlite_path)
+            cursor = conn.cursor()
+            try:
+                cursor.execute("""
+                    INSERT INTO notifications
+                        (id, recipient, grievance_id, complaint_id, notification_type, title, message, created_at, is_read, event_key, metadata)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """, (notification_id, recipient, grievance_id, complaint_id, notification_type, title, message, timestamp, event_key, metadata_json))
+                conn.commit()
+            except sqlite3.IntegrityError:
+                conn.close()
+                if event_key:
+                    return self.get_notification_by_event_key(event_key)
+                return None
+            conn.close()
+            return self._format_notification(notification_data)
+
+    def get_notifications(self, recipient, page=1, limit=20):
+        if not recipient:
+            return [], 0, 0
+
+        page = max(1, page)
+        limit = max(1, limit)
+        offset = (page - 1) * limit
+
+        if self.db_type == 'mongodb':
+            total = self.mongo_db.notifications.count_documents({"recipient": recipient})
+            unread_count = self.mongo_db.notifications.count_documents({"recipient": recipient, "is_read": 0})
+            cursor = self.mongo_db.notifications.find({"recipient": recipient}).sort("created_at", -1).skip(offset).limit(limit)
+            notifications = [self._format_notification(doc) for doc in cursor]
+            return notifications, total, unread_count
+        else:
+            conn = sqlite3.connect(self.sqlite_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            total = cursor.execute("SELECT COUNT(*) FROM notifications WHERE recipient = ?", (recipient,)).fetchone()[0]
+            unread_count = cursor.execute("SELECT COUNT(*) FROM notifications WHERE recipient = ? AND is_read = 0", (recipient,)).fetchone()[0]
+            rows = cursor.execute("""
+                SELECT id, recipient, grievance_id, complaint_id, notification_type, title, message, created_at, is_read, event_key, metadata
+                FROM notifications
+                WHERE recipient = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+            """, (recipient, limit, offset)).fetchall()
+            conn.close()
+            notifications = [self._format_notification(dict(r)) for r in rows]
+            return notifications, total, unread_count
+
+    def mark_notification_read(self, notification_id, recipient):
+        if not recipient or not notification_id:
+            return None
+
+        if self.db_type == 'mongodb':
+            result = self.mongo_db.notifications.find_one_and_update(
+                {"_id": notification_id, "recipient": recipient},
+                {"$set": {"is_read": 1}},
+                return_document=ReturnDocument.AFTER,
+            )
+            return self._format_notification(result) if result else None
+        else:
+            conn = sqlite3.connect(self.sqlite_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE notifications SET is_read = 1 WHERE id = ? AND recipient = ?",
+                (notification_id, recipient),
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                conn.close()
+                return None
+            row = cursor.execute("SELECT * FROM notifications WHERE id = ?", (notification_id,)).fetchone()
+            conn.close()
+            return self._format_notification(dict(row)) if row else None
+
+    def mark_all_notifications_read(self, recipient):
+        if not recipient:
+            return 0
+
+        if self.db_type == 'mongodb':
+            res = self.mongo_db.notifications.update_many(
+                {"recipient": recipient, "is_read": 0},
+                {"$set": {"is_read": 1}},
+            )
+            return res.modified_count
+        else:
+            conn = sqlite3.connect(self.sqlite_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE notifications SET is_read = 1 WHERE recipient = ? AND is_read = 0",
+                (recipient,),
+            )
+            count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return count

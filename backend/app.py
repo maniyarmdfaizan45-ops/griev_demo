@@ -7,9 +7,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import local modules
+import jwt
 from database import GrievanceDB
 from classifier import ComplaintClassifier
-from auth import encode_auth_token, token_required
+from auth import encode_auth_token, encode_citizen_token, token_required, SECRET_KEY
 from departments import get_department_for_category, DEPARTMENTS
 from similarity import find_related_complaints
 
@@ -156,10 +157,23 @@ def submit_complaint():
             db.get_active_complaints(exclude_id=saved_complaint["id"]),
         )
         saved_complaint = db.save_related_grievances(saved_complaint["id"], related_grievances)
+        if related_grievances:
+            db.create_notification(
+                recipient="admin",
+                notification_type="DUPLICATE_DETECTED",
+                title="Possible Duplicate Detected",
+                message=f"Grievance {saved_complaint['grievance_id']} has {len(related_grievances)} potential duplicate/related grievance(s) flagged.",
+                grievance_id=saved_complaint["grievance_id"],
+                complaint_id=saved_complaint["id"],
+                event_key=f"duplicate:{saved_complaint['id']}:admin",
+                metadata={"related_count": len(related_grievances)},
+            )
+        citizen_token = encode_citizen_token(saved_complaint["grievance_id"])
         return jsonify({
             "status": "success",
             "message": "Complaint submitted successfully",
             "complaint": saved_complaint,
+            "token": citizen_token,
             "possible_duplicate": bool(related_grievances),
             "related_grievances": related_grievances,
         }), 201
@@ -354,6 +368,100 @@ def dashboard_stats():
             "status": "error",
             "message": f"Could not compute dashboard stats: {str(e)}"
         }), 500
+
+def get_authenticated_recipient():
+    """Helper to extract user/recipient context strictly from verified JWT tokens."""
+    token = None
+    if 'Authorization' in request.headers:
+        auth_header = request.headers['Authorization']
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        else:
+            token = auth_header
+
+    if not token:
+        return None
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        return payload.get('sub')
+    except Exception:
+        return None
+
+@app.route('/api/notifications', methods=['GET'])
+def get_user_notifications():
+    """Get notifications for the authenticated user or identified citizen."""
+    recipient = get_authenticated_recipient()
+    if not recipient:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication or grievance identification required"
+        }), 401
+
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        return jsonify({
+            "status": "error",
+            "message": "Page and limit parameters must be integers"
+        }), 400
+
+    notifications, total, unread_count = db.get_notifications(
+        recipient=recipient,
+        page=page,
+        limit=limit,
+    )
+
+    return jsonify({
+        "status": "success",
+        "recipient": recipient,
+        "notifications": notifications,
+        "total": total,
+        "unread_count": unread_count,
+        "page": page,
+        "limit": limit,
+    }), 200
+
+@app.route('/api/notifications/<notification_id>/read', methods=['PUT'])
+def mark_notification_read(notification_id):
+    """Mark a single notification as read."""
+    recipient = get_authenticated_recipient()
+    if not recipient:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication or grievance identification required"
+        }), 401
+
+    notification = db.mark_notification_read(notification_id, recipient)
+    if not notification:
+        return jsonify({
+            "status": "error",
+            "message": f"Notification {notification_id} not found or unauthorized"
+        }), 404
+
+    return jsonify({
+        "status": "success",
+        "message": "Notification marked as read",
+        "notification": notification,
+    }), 200
+
+@app.route('/api/notifications/read-all', methods=['PUT'])
+def mark_all_notifications_read():
+    """Mark all notifications for recipient as read."""
+    recipient = get_authenticated_recipient()
+    if not recipient:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication or grievance identification required"
+        }), 401
+
+    count = db.mark_all_notifications_read(recipient)
+    return jsonify({
+        "status": "success",
+        "message": "All notifications marked as read",
+        "updated_count": count,
+    }), 200
 
 if __name__ == '__main__':
     # Get port from environment or default to 5000

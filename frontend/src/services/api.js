@@ -13,7 +13,7 @@ const apiClient = axios.create({
 // Request Interceptor: Automatically inject JWT token into the Authorization header
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('admin_token');
+    const token = localStorage.getItem('admin_token') || localStorage.getItem('citizen_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -93,6 +93,19 @@ export const apiService = {
   // Admin: Fetch stats for charts
   getDashboardStats: () => {
     return apiClient.get('/dashboard-stats');
+  },
+
+  // Notifications API
+  getNotifications: (params) => {
+    return apiClient.get('/notifications', { params });
+  },
+
+  markNotificationAsRead: (id) => {
+    return apiClient.put(`/notifications/${id}/read`);
+  },
+
+  markAllNotificationsAsRead: () => {
+    return apiClient.put('/notifications/read-all');
   }
 };
 

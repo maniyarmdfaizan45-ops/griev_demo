@@ -25,6 +25,25 @@ def encode_auth_token(username):
     except Exception as e:
         return str(e)
 
+def encode_citizen_token(grievance_id):
+    """
+    Generates a JWT Token for a citizen's grievance session (7 days expiration)
+    """
+    try:
+        payload = {
+            'exp': datetime.now(timezone.utc) + timedelta(days=7),
+            'iat': datetime.now(timezone.utc),
+            'sub': grievance_id,
+            'role': 'citizen'
+        }
+        return jwt.encode(
+            payload,
+            SECRET_KEY,
+            algorithm='HS256'
+        )
+    except Exception as e:
+        return str(e)
+
 def token_required(f):
     """
     Decorator to secure routes with JWT tokens

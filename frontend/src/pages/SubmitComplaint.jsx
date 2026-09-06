@@ -137,6 +137,12 @@ export default function SubmitComplaint() {
       const response = await apiService.submitComplaint(payload);
       if (response.status === 'success') {
         setSuccess(response.complaint);
+        if (response.token) {
+          localStorage.setItem('citizen_token', response.token);
+        }
+        if (response.complaint?.grievance_id) {
+          localStorage.setItem('last_grievance_id', response.complaint.grievance_id);
+        }
         // Clear all fields
         setName('');
         setEmail('');
