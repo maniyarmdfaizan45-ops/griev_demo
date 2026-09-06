@@ -1037,78 +1037,100 @@ class GrievanceDB:
         return updated_complaint
 
     def get_dashboard_stats(self):
-        if self.db_type == 'mongodb':
-            # MongoDB stats calculations
-            total = self.mongo_db.complaints.count_documents({})
-            high_priority = self.mongo_db.complaints.count_documents({"priority": "High"})
-            pending = self.mongo_db.complaints.count_documents({"status": {"$in": ["SUBMITTED", "ASSIGNED", "IN_PROGRESS", "REOPENED", "Pending", "In Progress"]}})
-            resolved = self.mongo_db.complaints.count_documents({"status": {"$in": ["RESOLVED", "CLOSED", "Resolved"]}})
-            
-            # Category aggregation
-            cat_pipeline = [{"$group": {"_id": "$category", "count": {"$sum": 1}}}]
-            cat_results = list(self.mongo_db.complaints.aggregate(cat_pipeline))
-            category_counts = {item["_id"]: item["count"] for item in cat_results}
-            
-            # Priority aggregation
-            pri_pipeline = [{"$group": {"_id": "$priority", "count": {"$sum": 1}}}]
-            pri_results = list(self.mongo_db.complaints.aggregate(pri_pipeline))
-            priority_counts = {item["_id"]: item["count"] for item in pri_results}
-            
-            # Get latest 100 complaints for trend sorting
-            recent_complaints = list(self.mongo_db.complaints.find({}, {"timestamp": 1}).sort("timestamp", 1).limit(100))
-            
-        else:
-            conn = sqlite3.connect(self.sqlite_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            # Total counts
-            cursor.execute("SELECT COUNT(*) as count FROM complaints")
-            total = cursor.fetchone()["count"]
-            
-            cursor.execute("SELECT COUNT(*) as count FROM complaints WHERE priority = 'High'")
-            high_priority = cursor.fetchone()["count"]
-            
-            cursor.execute("SELECT COUNT(*) as count FROM complaints WHERE status IN ('SUBMITTED', 'ASSIGNED', 'IN_PROGRESS', 'REOPENED')")
-            pending = cursor.fetchone()["count"]
-            
-            cursor.execute("SELECT COUNT(*) as count FROM complaints WHERE status IN ('RESOLVED', 'CLOSED')")
-            resolved = cursor.fetchone()["count"]
-            
-            # Category aggregation
-            cursor.execute("SELECT category, COUNT(*) as count FROM complaints GROUP BY category")
-            category_counts = {row["category"]: row["count"] for row in cursor.fetchall()}
-            
-            # Priority aggregation
-            cursor.execute("SELECT priority, COUNT(*) as count FROM complaints GROUP BY priority")
-            priority_counts = {row["priority"]: row["count"] for row in cursor.fetchall()}
-            
-            # Get recent complaint timestamps for trend tracking
-            cursor.execute("SELECT timestamp FROM complaints ORDER BY timestamp ASC LIMIT 100")
-            recent_complaints = [{"timestamp": row["timestamp"]} for row in cursor.fetchall()]
-            
-            conn.close()
+        # Fetch all complaints to build complete, accurate metrics
+        all_raw, _ = self.get_complaints(page=1, limit=10000)
+        total = len(all_raw)
 
-        # Parse trends (count by date)
+        high_priority = sum(1 for c in all_raw if c.get("priority") == "High")
+        pending = sum(1 for c in all_raw if c.get("status") in {"SUBMITTED", "ASSIGNED", "IN_PROGRESS", "REOPENED"})
+        resolved = sum(1 for c in all_raw if c.get("status") in {"RESOLVED", "CLOSED"})
+
+        # Category distribution
+        categories = ["Water", "Electricity", "Road", "Garbage", "Others"]
+        category_counts = {cat: 0 for cat in categories}
+        for c in all_raw:
+            cat = c.get("category", "Others")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+
+        # Priority distribution
+        priorities = ["High", "Medium", "Low"]
+        priority_counts = {pri: 0 for pri in priorities}
+        for c in all_raw:
+            pri = c.get("priority", "Low")
+            priority_counts[pri] = priority_counts.get(pri, 0) + 1
+
+        # Trend data
         trends = {}
-        for comp in recent_complaints:
-            # ISO timestamp e.g. "2026-07-16T19:42:07.123Z" -> extract "2026-07-16"
-            date_str = comp["timestamp"][:10]
-            trends[date_str] = trends.get(date_str, 0) + 1
-            
+        for c in sorted(all_raw, key=lambda x: x.get("timestamp", ""))[:100]:
+            ts = c.get("timestamp", "")[:10]
+            if ts:
+                trends[ts] = trends.get(ts, 0) + 1
         trend_data = [{"date": k, "complaints": v} for k, v in sorted(trends.items())]
 
-        # Make sure category counts includes all categories with at least 0
-        categories = ["Water", "Electricity", "Road", "Garbage", "Others"]
+        # SLA Analytics
+        total_sla_tracked = total
+        within_sla = sum(1 for c in all_raw if c.get("sla_status") == "WITHIN_SLA")
+        near_deadline = sum(1 for c in all_raw if c.get("sla_status") == "NEAR_DEADLINE")
+        currently_breached = sum(1 for c in all_raw if c.get("sla_status") == "SLA_BREACHED")
+        resolved_within_sla = sum(1 for c in all_raw if c.get("sla_status") == "RESOLVED_WITHIN_SLA" or c.get("sla_result") == "RESOLVED_WITHIN_SLA")
+        resolved_after_sla = sum(1 for c in all_raw if c.get("sla_status") == "RESOLVED_AFTER_SLA" or c.get("sla_result") == "RESOLVED_AFTER_SLA")
+
+        total_breaches = currently_breached + resolved_after_sla
+        sla_breach_rate = round((total_breaches / total_sla_tracked * 100), 1) if total_sla_tracked > 0 else 0.0
+        sla_compliance_rate = round((100.0 - sla_breach_rate), 1) if total_sla_tracked > 0 else 100.0
+
+        # Resolution Analytics
+        resolved_with_time = [c for c in all_raw if c.get("resolution_time_hours") is not None and c.get("status") in {"RESOLVED", "CLOSED"}]
+        avg_res_time_overall = round(sum(c["resolution_time_hours"] for c in resolved_with_time) / len(resolved_with_time), 1) if resolved_with_time else 0.0
+
+        avg_res_by_cat = {}
         for cat in categories:
-            if cat not in category_counts:
-                category_counts[cat] = 0
-                
-        # Make sure priorities includes all categories with at least 0
-        priorities = ["High", "Medium", "Low"]
-        for pri in priorities:
-            if pri not in priority_counts:
-                priority_counts[pri] = 0
+            cat_resolved = [c for c in resolved_with_time if c.get("category") == cat]
+            avg_res_by_cat[cat] = round(sum(c["resolution_time_hours"] for c in cat_resolved) / len(cat_resolved), 1) if cat_resolved else 0.0
+
+        avg_res_by_dept = {}
+        for dept in DEPARTMENTS:
+            dept_resolved = [c for c in resolved_with_time if c.get("department") == dept]
+            avg_res_by_dept[dept] = round(sum(c["resolution_time_hours"] for c in dept_resolved) / len(dept_resolved), 1) if dept_resolved else 0.0
+
+        # Escalation Analytics
+        total_escalated = sum(1 for c in all_raw if c.get("escalation_status") == ESCALATION_ESCALATED or c.get("escalation_level", 0) > 0)
+        escalation_rate = round((total_escalated / total * 100), 1) if total > 0 else 0.0
+        escalation_by_dept = {}
+        for dept in DEPARTMENTS:
+            escalation_by_dept[dept] = sum(1 for c in all_raw if c.get("department") == dept and (c.get("escalation_status") == ESCALATION_ESCALATED or c.get("escalation_level", 0) > 0))
+
+        # Reopen Analytics
+        total_reopened = sum(1 for c in all_raw if c.get("status") == "REOPENED" or c.get("reopened_by") is not None)
+        reopen_rate = round((total_reopened / total * 100), 1) if total > 0 else 0.0
+
+        # Department Performance Matrix
+        department_performance = []
+        for dept in DEPARTMENTS:
+            dept_all = [c for c in all_raw if c.get("department") == dept]
+            d_tot = len(dept_all)
+            d_act = sum(1 for c in dept_all if c.get("status") in {"SUBMITTED", "ASSIGNED", "IN_PROGRESS", "REOPENED"})
+            d_res = sum(1 for c in dept_all if c.get("status") in {"RESOLVED", "CLOSED"})
+            d_res_rate = round((d_res / d_tot * 100), 1) if d_tot > 0 else 0.0
+
+            d_resolved_time = [c for c in dept_all if c.get("resolution_time_hours") is not None and c.get("status") in {"RESOLVED", "CLOSED"}]
+            d_avg_time = round(sum(c["resolution_time_hours"] for c in d_resolved_time) / len(d_resolved_time), 1) if d_resolved_time else 0.0
+
+            d_breaches = sum(1 for c in dept_all if c.get("sla_status") in {"SLA_BREACHED", "RESOLVED_AFTER_SLA"} or c.get("sla_result") == "RESOLVED_AFTER_SLA")
+            d_breach_rate = round((d_breaches / d_tot * 100), 1) if d_tot > 0 else 0.0
+            d_escalations = sum(1 for c in dept_all if c.get("escalation_status") == ESCALATION_ESCALATED or c.get("escalation_level", 0) > 0)
+
+            department_performance.append({
+                "department": dept,
+                "total_complaints": d_tot,
+                "active_complaints": d_act,
+                "resolved_complaints": d_res,
+                "resolution_rate": d_res_rate,
+                "avg_resolution_time": d_avg_time,
+                "sla_breach_count": d_breaches,
+                "sla_breach_rate": d_breach_rate,
+                "escalation_count": d_escalations,
+            })
 
         return {
             "total_complaints": total,
@@ -1117,7 +1139,32 @@ class GrievanceDB:
             "resolved_complaints": resolved,
             "category_distribution": category_counts,
             "priority_distribution": priority_counts,
-            "trend_data": trend_data
+            "trend_data": trend_data,
+            "sla_analytics": {
+                "total_sla_tracked": total_sla_tracked,
+                "within_sla": within_sla,
+                "near_deadline": near_deadline,
+                "currently_breached": currently_breached,
+                "resolved_within_sla": resolved_within_sla,
+                "resolved_after_sla": resolved_after_sla,
+                "sla_breach_rate": sla_breach_rate,
+                "sla_compliance_rate": sla_compliance_rate,
+            },
+            "resolution_analytics": {
+                "avg_resolution_time_hours": avg_res_time_overall,
+                "avg_resolution_time_by_category": avg_res_by_cat,
+                "avg_resolution_time_by_department": avg_res_by_dept,
+            },
+            "escalation_analytics": {
+                "total_escalated": total_escalated,
+                "escalation_rate": escalation_rate,
+                "escalation_by_department": escalation_by_dept,
+            },
+            "reopen_analytics": {
+                "total_reopened": total_reopened,
+                "reopen_rate": reopen_rate,
+            },
+            "department_performance": department_performance,
         }
 
     # ==================== NOTIFICATIONS ENGINE ====================

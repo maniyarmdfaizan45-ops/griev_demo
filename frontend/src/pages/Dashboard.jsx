@@ -228,6 +228,26 @@ export default function Dashboard() {
     return Math.round((stats.resolved_complaints / stats.total_complaints) * 100);
   };
 
+  const getSlaChartData = () => {
+    if (!stats || !stats.sla_analytics) return [];
+    const sla = stats.sla_analytics;
+    return [
+      { name: 'Within SLA', value: sla.within_sla || 0, color: '#16A34A' },
+      { name: 'Near Deadline', value: sla.near_deadline || 0, color: '#EA580C' },
+      { name: 'Breached (Active)', value: sla.currently_breached || 0, color: '#DC2626' },
+      { name: 'Resolved (In SLA)', value: sla.resolved_within_sla || 0, color: '#059669' },
+      { name: 'Resolved (After SLA)', value: sla.resolved_after_sla || 0, color: '#B91C1C' },
+    ].filter((item) => item.value > 0);
+  };
+
+  const getDeptResTimeChartData = () => {
+    if (!stats || !stats.resolution_analytics?.avg_resolution_time_by_department) return [];
+    return Object.entries(stats.resolution_analytics.avg_resolution_time_by_department).map(([name, hours]) => ({
+      name: name.replace(' Department', '').replace(' Board', ''),
+      hours: hours,
+    }));
+  };
+
   const parseComplaintText = (fullText) => {
     const descMarker = "DESCRIPTION:\n";
     if (fullText.includes(descMarker)) {
@@ -333,39 +353,60 @@ export default function Dashboard() {
           <div className="space-y-6">
             {/* Top metrics */}
             {stats ? (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-4 shadow-sm">
-                  <div className="rounded bg-blue-50 p-2.5 text-[#1E40AF] border border-blue-100"><FileText size={20} /></div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                  <div className="rounded bg-blue-50 p-2 text-[#1E40AF] border border-blue-100"><Inbox size={18} /></div>
                   <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Grievances</span>
-                    <strong className="text-xl font-extrabold text-slate-900">{stats.total_complaints}</strong>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">Total Grievances</span>
+                    <strong className="text-lg font-extrabold text-slate-900">{stats.total_complaints}</strong>
                   </div>
                 </div>
-                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-4 shadow-sm">
-                  <div className="rounded bg-red-50 p-2.5 text-[#DC2626] border border-red-100"><ShieldAlert size={20} /></div>
+                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                  <div className="rounded bg-green-50 p-2 text-[#16A34A] border border-green-100"><CheckCircle2 size={18} /></div>
                   <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Escalated Priority</span>
-                    <strong className="text-xl font-extrabold text-[#DC2626]">{stats.high_priority_complaints}</strong>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">Resolution Rate</span>
+                    <strong className="text-lg font-extrabold text-[#16A34A]">{getResolutionRate()}%</strong>
                   </div>
                 </div>
-                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-4 shadow-sm">
-                  <div className="rounded bg-orange-50 p-2.5 text-[#EA580C] border border-orange-100"><Clock size={20} /></div>
+                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                  <div className="rounded bg-emerald-50 p-2 text-emerald-700 border border-emerald-100"><Sparkles size={18} /></div>
                   <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Active Pending</span>
-                    <strong className="text-xl font-extrabold text-[#EA580C]">{stats.pending_complaints}</strong>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">SLA Compliance</span>
+                    <strong className="text-lg font-extrabold text-emerald-700">{stats.sla_analytics?.sla_compliance_rate ?? 100}%</strong>
                   </div>
                 </div>
-                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-4 shadow-sm">
-                  <div className="rounded bg-green-50 p-2.5 text-[#16A34A] border border-green-100"><CheckCircle2 size={20} /></div>
+                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                  <div className="rounded bg-rose-50 p-2 text-rose-600 border border-rose-100"><AlertCircle size={18} /></div>
                   <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Resolution Rate</span>
-                    <strong className="text-xl font-extrabold text-[#16A34A]">{getResolutionRate()}%</strong>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">SLA Breach Rate</span>
+                    <strong className="text-lg font-extrabold text-rose-600">{stats.sla_analytics?.sla_breach_rate ?? 0}%</strong>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                  <div className="rounded bg-red-50 p-2 text-[#DC2626] border border-red-100"><ShieldAlert size={18} /></div>
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">Escalations</span>
+                    <strong className="text-lg font-extrabold text-[#DC2626]">{stats.escalation_analytics?.total_escalated ?? 0} <span className="text-[10px] font-semibold text-slate-400">({stats.escalation_analytics?.escalation_rate ?? 0}%)</span></strong>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                  <div className="rounded bg-amber-50 p-2 text-amber-700 border border-amber-100"><RefreshCw size={18} /></div>
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">Reopened</span>
+                    <strong className="text-lg font-extrabold text-amber-700">{stats.reopen_analytics?.total_reopened ?? 0} <span className="text-[10px] font-semibold text-slate-400">({stats.reopen_analytics?.reopen_rate ?? 0}%)</span></strong>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                  <div className="rounded bg-slate-100 p-2 text-slate-700 border border-slate-200"><Clock size={18} /></div>
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">Avg Res Duration</span>
+                    <strong className="text-lg font-extrabold text-slate-800">{stats.resolution_analytics?.avg_resolution_time_hours ?? 0}h</strong>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {[...Array(4)].map((_, i) => (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+                {[...Array(7)].map((_, i) => (
                   <div key={i} className="h-20 animate-pulse rounded border border-slate-300 bg-white" />
                 ))}
               </div>
@@ -396,24 +437,22 @@ export default function Dashboard() {
                 </div>
 
                 <div className="rounded border border-slate-300 bg-white p-4 shadow-sm h-[320px] flex flex-col">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-4 pb-2 border-b border-slate-100">Grievance Priority Counts</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-4 pb-2 border-b border-slate-100">SLA Status Distribution</h3>
                   <div className="flex-1 min-h-0">
-                    {stats.total_complaints > 0 ? (
+                    {getSlaChartData().length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={getBarChartData()} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                          <XAxis dataKey="name" stroke="#64748b" fontSize={9} tickLine={false} />
-                          <YAxis stroke="#64748b" fontSize={9} tickLine={false} />
-                          <Tooltip cursor={{ fill: 'rgba(0,0,0,0.02)' }} contentStyle={{ backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '10px' }} />
-                          <Bar dataKey="count" radius={[2, 2, 0, 0]}>
-                            {getBarChartData().map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={PRIORITY_COLORS[entry.name] || '#1E40AF'} />
+                        <PieChart>
+                          <Pie data={getSlaChartData()} cx="50%" cy="45%" innerRadius={50} outerRadius={70} paddingAngle={4} dataKey="value">
+                            {getSlaChartData().map((entry, index) => (
+                              <Cell key={`sla-cell-${index}`} fill={entry.color} />
                             ))}
-                          </Bar>
-                        </BarChart>
+                          </Pie>
+                          <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '10px' }} />
+                          <Legend verticalAlign="bottom" align="center" iconSize={6} iconType="square" wrapperStyle={{ fontSize: '9px', paddingTop: '10px' }} />
+                        </PieChart>
                       </ResponsiveContainer>
                     ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-slate-400">No database grievances to plot.</div>
+                      <div className="flex h-full items-center justify-center text-xs text-slate-400">No SLA status records available.</div>
                     )}
                   </div>
                 </div>
@@ -893,43 +932,122 @@ export default function Dashboard() {
         {/* Tab 5: Reports View */}
         {activeTab === 'reports' && (
           <div className="rounded border border-slate-300 bg-white p-5 shadow-sm space-y-6">
-            <div className="border-b border-slate-100 pb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Grievance Audit Summary</h3>
-              <p className="text-[10px] text-slate-500">Export performance statistics and disposal records for executive reviews.</p>
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Admin Performance & Governance Reports</h3>
+                <p className="text-[10px] text-slate-500">Comprehensive analytics across SLA compliance, resolution times, escalations, and department metrics.</p>
+              </div>
+              <button
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-1.5 rounded bg-[#1E40AF] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#16327e] transition shadow-sm"
+              >
+                <Download size={13} /> Print Report
+              </button>
             </div>
-            
-            <div className="grid gap-6 sm:grid-cols-3 text-xs">
-              <div className="rounded border border-slate-200 p-4 space-y-2">
-                <span className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider">Intake Frequency</span>
-                <strong className="text-lg text-slate-900 block">Avg. 14 complaints / day</strong>
-                <p className="text-[10px] text-slate-400 leading-normal">Derived from the past 14 days of dashboard synchronization.</p>
+
+            {/* KPI Cards */}
+            {stats && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded border border-slate-200 p-3.5 bg-slate-50">
+                  <span className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider">SLA Compliance Rate</span>
+                  <strong className="text-xl text-emerald-700 block mt-1">{stats.sla_analytics?.sla_compliance_rate ?? 100}%</strong>
+                  <p className="text-[10px] text-slate-400 mt-1">Breach Rate: {stats.sla_analytics?.sla_breach_rate ?? 0}% ({stats.sla_analytics?.currently_breached + stats.sla_analytics?.resolved_after_sla || 0} breaches)</p>
+                </div>
+                <div className="rounded border border-slate-200 p-3.5 bg-slate-50">
+                  <span className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider">Average Resolution Time</span>
+                  <strong className="text-xl text-slate-900 block mt-1">{stats.resolution_analytics?.avg_resolution_time_hours ?? 0} hours</strong>
+                  <p className="text-[10px] text-slate-400 mt-1">Average time from submission to resolution.</p>
+                </div>
+                <div className="rounded border border-slate-200 p-3.5 bg-slate-50">
+                  <span className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider">Escalations</span>
+                  <strong className="text-xl text-rose-600 block mt-1">{stats.escalation_analytics?.total_escalated ?? 0}</strong>
+                  <p className="text-[10px] text-slate-400 mt-1">Rate: {stats.escalation_analytics?.escalation_rate ?? 0}% of total complaints</p>
+                </div>
+                <div className="rounded border border-slate-200 p-3.5 bg-slate-50">
+                  <span className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider">Reopen Rate</span>
+                  <strong className="text-xl text-amber-700 block mt-1">{stats.reopen_analytics?.reopen_rate ?? 0}%</strong>
+                  <p className="text-[10px] text-slate-400 mt-1">Total Reopened: {stats.reopen_analytics?.total_reopened ?? 0}</p>
+                </div>
               </div>
-              <div className="rounded border border-slate-200 p-4 space-y-2">
-                <span className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider">Average Disposal SLA</span>
-                <strong className="text-lg text-slate-900 block">3.4 operational days</strong>
-                <p className="text-[10px] text-slate-400 leading-normal">Average time from submission to officer "Resolved" confirmation.</p>
-              </div>
-              <div className="rounded border border-slate-200 p-4 space-y-2">
-                <span className="block font-bold text-slate-500 text-[10px] uppercase tracking-wider">Classification Confidence</span>
-                <strong className="text-lg text-slate-900 block">94.8% accuracy</strong>
-                <p className="text-[10px] text-slate-400 leading-normal">AI classifier auto-routing compared against officer re-assignments.</p>
+            )}
+
+            {/* Department Performance Matrix Table */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">Department Performance Matrix</h4>
+              <div className="overflow-x-auto border border-slate-200 rounded">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold uppercase text-slate-500">
+                      <th className="p-3 pl-4">Department</th>
+                      <th className="p-3 text-center">Total</th>
+                      <th className="p-3 text-center">Active</th>
+                      <th className="p-3 text-center">Resolved</th>
+                      <th className="p-3 text-center">Res Rate (%)</th>
+                      <th className="p-3 text-center">Avg Duration (hrs)</th>
+                      <th className="p-3 text-center">SLA Breaches</th>
+                      <th className="p-3 text-center">Breach Rate (%)</th>
+                      <th className="p-3 text-center">Escalations</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {stats?.department_performance ? (
+                      stats.department_performance.map((dp) => (
+                        <tr key={dp.department} className="hover:bg-slate-50">
+                          <td className="p-3 pl-4 font-semibold text-slate-900">{dp.department}</td>
+                          <td className="p-3 text-center font-bold text-slate-700">{dp.total_complaints}</td>
+                          <td className="p-3 text-center font-semibold text-amber-700">{dp.active_complaints}</td>
+                          <td className="p-3 text-center font-semibold text-emerald-700">{dp.resolved_complaints}</td>
+                          <td className="p-3 text-center font-bold text-slate-800">{dp.resolution_rate}%</td>
+                          <td className="p-3 text-center font-mono text-slate-700">{dp.avg_resolution_time}h</td>
+                          <td className="p-3 text-center font-bold text-rose-600">{dp.sla_breach_count}</td>
+                          <td className="p-3 text-center font-bold text-rose-600">{dp.sla_breach_rate}%</td>
+                          <td className="p-3 text-center font-semibold text-purple-700">{dp.escalation_count}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={9} className="text-center py-4 text-slate-400">Loading department performance data...</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-200 flex flex-wrap gap-2.5">
-              <button
-                onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 rounded bg-[#1E40AF] px-4 py-2 text-xs font-bold text-white hover:bg-[#16327e] transition shadow-sm"
-              >
-                <Download size={13} /> Print Executive Summary
-              </button>
-              <button
-                onClick={() => alert('Disposal ledger exported as CSV (simulated).')}
-                className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
-              >
-                Export CSV Ledger
-              </button>
-            </div>
+            {/* Resolution Time & SLA Distribution Charts */}
+            {stats && (
+              <div className="grid gap-6 md:grid-cols-2 pt-2">
+                <div className="rounded border border-slate-300 bg-white p-4 shadow-sm h-[300px] flex flex-col">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 pb-2 border-b border-slate-100">Avg Resolution Time by Department (Hours)</h4>
+                  <div className="flex-1 min-h-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={getDeptResTimeChartData()} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={8} tickLine={false} interval={0} angle={-15} textAnchor="end" />
+                        <YAxis stroke="#64748b" fontSize={9} tickLine={false} />
+                        <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '10px' }} />
+                        <Bar dataKey="hours" fill="#1E40AF" radius={[2, 2, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="rounded border border-slate-300 bg-white p-4 shadow-sm h-[300px] flex flex-col">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 pb-2 border-b border-slate-100">SLA Status Distribution</h4>
+                  <div className="flex-1 min-h-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={getSlaChartData()} cx="50%" cy="45%" innerRadius={45} outerRadius={65} paddingAngle={4} dataKey="value">
+                          {getSlaChartData().map((entry, index) => (
+                            <Cell key={`sla-rep-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '10px' }} />
+                        <Legend verticalAlign="bottom" align="center" iconSize={6} iconType="square" wrapperStyle={{ fontSize: '9px', paddingTop: '5px' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
