@@ -142,6 +142,11 @@ def submit_complaint():
             "message": f"Unknown department: {department}"
         }), 400
         
+    name = data.get('name')
+    phone = data.get('phone')
+    location = data.get('location')
+    address = data.get('address')
+        
     try:
         saved_complaint = db.insert_complaint(
             text=text,
@@ -149,6 +154,10 @@ def submit_complaint():
             priority=priority,
             sentiment_score=sentiment_score,
             department=department,
+            name=name,
+            phone=phone,
+            location=location,
+            address=address,
         )
         related_grievances = find_related_complaints(
             text,
@@ -193,6 +202,19 @@ def get_complaints():
     priority = request.args.get('priority', 'All')
     status = request.args.get('status', 'All')
     escalation = request.args.get('escalation', 'All')
+    department = request.args.get('department', 'All')
+    sla_status = request.args.get('sla_status', 'All')
+    
+    is_admin = False
+    if 'Authorization' in request.headers:
+        auth_header = request.headers['Authorization']
+        token = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else auth_header
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            if payload.get('role') != 'citizen' and payload.get('sub'):
+                is_admin = True
+        except Exception:
+            pass
     
     try:
         page = int(request.args.get('page', 1))
@@ -209,6 +231,9 @@ def get_complaints():
         priority=priority,
         status=status,
         escalation=escalation,
+        department=department,
+        sla_status=sla_status,
+        is_admin=is_admin,
         page=page,
         limit=limit
     )

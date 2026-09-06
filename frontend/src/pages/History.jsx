@@ -20,6 +20,7 @@ export default function History() {
   const [category, setCategory] = useState('All');
   const [priority, setPriority] = useState('All');
   const [status, setStatus] = useState('All');
+  const [department, setDepartment] = useState('All');
   const [page, setPage] = useState(1);
   const limit = 10;
 
@@ -32,6 +33,7 @@ export default function History() {
         category: activeTab === 'ledger' ? category : 'All',
         priority: activeTab === 'ledger' ? priority : 'All',
         status: activeTab === 'ledger' ? status : 'All',
+        department: activeTab === 'ledger' ? department : 'All',
         page: activeTab === 'ledger' ? page : 1,
         limit: activeTab === 'ledger' ? limit : 100 // Fetch larger set to find items during track
       };
@@ -45,7 +47,7 @@ export default function History() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, search, category, priority, status, page]);
+  }, [activeTab, search, category, priority, status, department, page]);
 
   useEffect(() => {
     fetchComplaints();
@@ -62,6 +64,7 @@ export default function History() {
     setCategory('All');
     setPriority('All');
     setStatus('All');
+    setDepartment('All');
     setPage(1);
   };
 
@@ -418,6 +421,17 @@ export default function History() {
 
             <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-200 pt-4 text-xs text-slate-600">
               <div className="flex items-center gap-1.5"><Filter size={13} className="text-[#1E40AF]" /> Filter Selection</div>
+              <div className="flex items-center gap-1.5">
+                <span>Department:</span>
+                <select value={department} onChange={(e) => { setDepartment(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs outline-none focus:border-[#1E40AF]">
+                  <option value="All">All Departments</option>
+                  <option value="Water Supply">Water Supply</option>
+                  <option value="Electricity">Electricity</option>
+                  <option value="Public Works (Roads)">Public Works (Roads)</option>
+                  <option value="Solid Waste Management">Solid Waste Management</option>
+                  <option value="Civic Support Cell">Civic Support Cell</option>
+                </select>
+              </div>
               <div className="flex items-center gap-1.5">
                 <span>Category:</span>
                 <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs outline-none focus:border-[#1E40AF]">

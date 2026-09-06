@@ -160,6 +160,10 @@ class GrievanceDB:
             "closed_at": "TEXT",
             "reopened_reason": "TEXT",
             "reopened_by": "TEXT",
+            "name": "TEXT",
+            "phone": "TEXT",
+            "location": "TEXT",
+            "address": "TEXT",
         }.items():
             if name not in columns:
                 cursor.execute(f"ALTER TABLE complaints ADD COLUMN {name} {definition}")
@@ -360,7 +364,7 @@ class GrievanceDB:
             {"$set": {"possible_duplicate": False, "related_grievances": []}},
         )
 
-    def insert_complaint(self, text, category, priority, sentiment_score, department=None, created_at=None):
+    def insert_complaint(self, text, category, priority, sentiment_score, department=None, created_at=None, name=None, phone=None, location=None, address=None):
         timestamp = created_at or (datetime.utcnow().isoformat() + "Z")
         complaint_id = str(uuid.uuid4())
         grievance_id = None
@@ -393,6 +397,10 @@ class GrievanceDB:
             "escalation_reason": None,
             "possible_duplicate": 0,
             "related_grievances": "[]",
+            "name": name,
+            "phone": phone,
+            "location": location,
+            "address": address,
         }
 
         if self.db_type == 'mongodb':
@@ -417,11 +425,11 @@ class GrievanceDB:
                     (id, complaint_text, category, priority, sentiment_score, status, timestamp, grievance_id, department,
                      sla_deadline, sla_original_deadline, sla_started_at, sla_result,
                      escalation_status, escalation_level, escalated_at, escalation_reason,
-                     possible_duplicate, related_grievances)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     possible_duplicate, related_grievances, name, phone, location, address)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (complaint_id, text, category, priority, float(sentiment_score), "SUBMITTED", timestamp,
                    grievance_id, department, sla_deadline, sla_deadline, timestamp, None,
-                   ESCALATION_NOT_ESCALATED, 0, None, None, 0, "[]"))
+                   ESCALATION_NOT_ESCALATED, 0, None, None, 0, "[]", name, phone, location, address))
             cursor.execute("""
                 INSERT INTO status_history
                     (complaint_id, old_status, new_status, changed_by, changed_at, remark)
@@ -609,18 +617,12 @@ class GrievanceDB:
             created_at=escalated_at,
         )
 
-    def get_complaints(self, search_query=None, category=None, priority=None, status=None, escalation=None, page=1, limit=10):
+    def get_complaints(self, search_query=None, category=None, priority=None, status=None, escalation=None, department=None, sla_status=None, is_admin=False, page=1, limit=10):
         # Calculate pagination skip
         skip = (page - 1) * limit
 
         if self.db_type == 'mongodb':
-            # Build MongoDB filter query
             query = {}
-            if search_query:
-                query["$or"] = [
-                    {"complaint_text": {"$regex": search_query, "$options": "i"}},
-                    {"grievance_id": {"$regex": search_query, "$options": "i"}},
-                ]
             if category and category != 'All':
                 query["category"] = category
             if priority and priority != 'All':
@@ -629,11 +631,9 @@ class GrievanceDB:
                 query["status"] = normalize_status(status)
             if escalation and escalation != 'All':
                 query["escalation_status"] = escalation
-                
-            total = self.mongo_db.complaints.count_documents(query)
-            cursor = self.mongo_db.complaints.find(query).sort("timestamp", -1).skip(skip).limit(limit)
-            
-            complaints = []
+
+            cursor = self.mongo_db.complaints.find(query).sort("timestamp", -1)
+            raw_list = []
             for doc in cursor:
                 doc["id"] = doc.get("_id", doc.get("id"))
                 if "_id" in doc:
@@ -641,11 +641,8 @@ class GrievanceDB:
                 doc["status"] = normalize_status(doc.get("status"))
                 doc["grievance_id"] = doc.get("grievance_id")
                 doc["department"] = doc.get("department") or get_department_for_category(doc.get("category"))
-                complaints.append(self._with_sla_data(doc))
-                
-            return complaints, total
+                raw_list.append(self._with_sla_data(doc))
         else:
-            # Build SQLite query dynamically
             conn = sqlite3.connect(self.sqlite_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -653,9 +650,6 @@ class GrievanceDB:
             query_str = "SELECT * FROM complaints WHERE 1=1"
             params = []
             
-            if search_query:
-                query_str += " AND (complaint_text LIKE ? OR grievance_id LIKE ?)"
-                params.extend([f"%{search_query}%", f"%{search_query}%"])
             if category and category != 'All':
                 query_str += " AND category = ?"
                 params.append(category)
@@ -669,52 +663,61 @@ class GrievanceDB:
                 query_str += " AND escalation_status = ?"
                 params.append(escalation)
                 
-            # Get total count first
-            count_query = query_str.replace("SELECT *", "SELECT COUNT(*) as count")
-            cursor.execute(count_query, params)
-            total = cursor.fetchone()["count"]
-            
-            # Add ordering and pagination
-            query_str += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
-            params.extend([limit, skip])
-            
+            query_str += " ORDER BY timestamp DESC"
             cursor.execute(query_str, params)
             rows = cursor.fetchall()
             
-            complaints = []
+            raw_list = []
             for row in rows:
-                complaints.append(self._with_sla_data({
-                    "id": row["id"],
-                    "complaint_text": row["complaint_text"],
-                    "category": row["category"],
-                    "priority": row["priority"],
-                    "sentiment_score": row["sentiment_score"],
-                    "status": normalize_status(row["status"]),
-                    "timestamp": row["timestamp"],
-                    "grievance_id": row["grievance_id"],
-                    "department": row["department"] or get_department_for_category(row["category"]),
-                    "sla_deadline": row["sla_deadline"],
-                    "sla_original_deadline": row["sla_original_deadline"],
-                    "sla_started_at": row["sla_started_at"],
-                    "sla_result": row["sla_result"],
-                    "escalation_status": row["escalation_status"],
-                    "escalation_level": row["escalation_level"],
-                    "escalated_at": row["escalated_at"],
-                    "escalation_reason": row["escalation_reason"],
-                    "possible_duplicate": row["possible_duplicate"],
-                    "related_grievances": row["related_grievances"],
-                    "assigned_to": row["assigned_to"],
-                    "assigned_at": row["assigned_at"],
-                    "resolution_date": row["resolution_date"],
-                    "resolution_remarks": row["resolution_remarks"],
-                    "resolved_by": row["resolved_by"],
-                    "closed_at": row["closed_at"],
-                    "reopened_reason": row["reopened_reason"],
-                    "reopened_by": row["reopened_by"],
-                }))
-                
+                row_dict = dict(row)
+                row_dict["status"] = normalize_status(row_dict.get("status"))
+                row_dict["department"] = row_dict.get("department") or get_department_for_category(row_dict.get("category"))
+                raw_list.append(self._with_sla_data(row_dict))
             conn.close()
-            return complaints, total
+
+        filtered = []
+        sq = search_query.strip().lower() if search_query else ""
+
+        for doc in raw_list:
+            # Department filter
+            if department and department != 'All':
+                doc_dept = (doc.get("department") or get_department_for_category(doc.get("category")) or "").lower()
+                target_dept = department.lower()
+                if target_dept != doc_dept and target_dept not in doc_dept and doc_dept not in target_dept:
+                    continue
+
+            # SLA status filter
+            if sla_status and sla_status != 'All':
+                doc_sla = (doc.get("sla_status") or "").upper()
+                target_sla = sla_status.upper()
+                if doc_sla != target_sla:
+                    continue
+
+            # Search query filter
+            if sq:
+                matched = False
+                c_text = (doc.get("complaint_text") or "").lower()
+                g_id = (doc.get("grievance_id") or "").lower()
+                c_id = (doc.get("id") or "").lower()
+
+                if sq in c_text or sq in g_id or sq in c_id:
+                    matched = True
+
+                if not matched and is_admin:
+                    name = (doc.get("name") or "").lower()
+                    phone = (doc.get("phone") or "").lower()
+                    loc = (doc.get("location") or doc.get("address") or "").lower()
+                    if sq in name or sq in phone or sq in loc:
+                        matched = True
+
+                if not matched:
+                    continue
+
+            filtered.append(doc)
+
+        total = len(filtered)
+        page_items = filtered[skip : skip + limit]
+        return page_items, total
 
     def get_complaint(self, complaint_id):
         if self.db_type == 'mongodb':

@@ -30,6 +30,8 @@ export default function Dashboard() {
   const [priority, setPriority] = useState('All');
   const [status, setStatus] = useState('All');
   const [escalation, setEscalation] = useState('All');
+  const [department, setDepartment] = useState('All');
+  const [slaStatus, setSlaStatus] = useState('All');
   const [page, setPage] = useState(1);
   const limit = 5;
 
@@ -55,6 +57,8 @@ export default function Dashboard() {
         priority,
         status,
         escalation,
+        department,
+        sla_status: slaStatus,
         page,
         limit
       };
@@ -72,7 +76,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [search, category, priority, status, escalation, page, limit, selectedAIComplaint]);
+  }, [search, category, priority, status, escalation, department, slaStatus, page, limit, selectedAIComplaint]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -368,14 +372,22 @@ export default function Dashboard() {
                     <strong className="text-lg font-extrabold text-[#16A34A]">{getResolutionRate()}%</strong>
                   </div>
                 </div>
-                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                <div 
+                  onClick={() => { setSlaStatus('WITHIN_SLA'); setPage(1); setActiveTab('complaints'); }}
+                  className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm cursor-pointer hover:border-emerald-500 transition"
+                  title="Click to view complaints within SLA"
+                >
                   <div className="rounded bg-emerald-50 p-2 text-emerald-700 border border-emerald-100"><Sparkles size={18} /></div>
                   <div>
                     <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">SLA Compliance</span>
                     <strong className="text-lg font-extrabold text-emerald-700">{stats.sla_analytics?.sla_compliance_rate ?? 100}%</strong>
                   </div>
                 </div>
-                <div className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm">
+                <div 
+                  onClick={() => { setSlaStatus('SLA_BREACHED'); setPage(1); setActiveTab('complaints'); }}
+                  className="flex items-center gap-3.5 rounded border border-slate-300 bg-white p-3.5 shadow-sm cursor-pointer hover:border-rose-500 transition"
+                  title="Click to view breached SLA complaints"
+                >
                   <div className="rounded bg-rose-50 p-2 text-rose-600 border border-rose-100"><AlertCircle size={18} /></div>
                   <div>
                     <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">SLA Breach Rate</span>
@@ -559,8 +571,16 @@ export default function Dashboard() {
 
             {/* Filter bar */}
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-              <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 outline-none">
+              <select value={department} onChange={(e) => { setDepartment(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 outline-none font-medium">
                 <option value="All">All Departments</option>
+                <option value="Water Supply">Water Supply</option>
+                <option value="Electricity">Electricity</option>
+                <option value="Public Works (Roads)">Public Works (Roads)</option>
+                <option value="Solid Waste Management">Solid Waste Management</option>
+                <option value="Civic Support Cell">Civic Support Cell</option>
+              </select>
+              <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 outline-none">
+                <option value="All">All Categories</option>
                 <option value="Water">Water</option>
                 <option value="Electricity">Electricity</option>
                 <option value="Road">Road</option>
@@ -581,6 +601,12 @@ export default function Dashboard() {
                 <option value="RESOLVED">Resolved</option>
                 <option value="CLOSED">Closed</option>
                 <option value="REOPENED">Reopened</option>
+              </select>
+              <select value={slaStatus} onChange={(e) => { setSlaStatus(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 outline-none font-medium text-blue-700 border-blue-200">
+                <option value="All">All SLA Statuses</option>
+                <option value="WITHIN_SLA">Within SLA</option>
+                <option value="NEAR_DEADLINE">Near Deadline</option>
+                <option value="SLA_BREACHED">SLA Breached</option>
               </select>
               <select value={escalation} onChange={(e) => { setEscalation(e.target.value); setPage(1); }} className="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 outline-none">
                 <option value="All">All Escalations</option>
