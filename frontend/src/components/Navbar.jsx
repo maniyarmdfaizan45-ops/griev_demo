@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Building2,
@@ -14,11 +14,15 @@ import {
   Globe,
   Bell,
   CheckCheck,
-  X,
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
   Info,
+  Clock,
+  Flame,
+  ShieldAlert,
+  Copy,
+  RefreshCw,
 } from 'lucide-react';
 import { apiService } from '../services/api';
 
@@ -28,33 +32,56 @@ export default function Navbar() {
   const adminToken = localStorage.getItem('admin_token');
   const citizenToken = localStorage.getItem('citizen_token');
   const activeToken = adminToken || citizenToken;
+
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
 
-  const fetchNotifications = async () => {
+  const [markingReadId, setMarkingReadId] = useState(null);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+
+  // Human-friendly relative timestamp helper
+  const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    const seconds = Math.floor((new Date() - date) / 1000);
+    if (seconds < 0) return 'Just now';
+    if (seconds < 60) return 'Just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  // Fetch notifications wrapped in useCallback
+  const fetchNotifications = useCallback(async () => {
     if (!activeToken) return;
     try {
       setLoading(true);
       const response = await apiService.getNotifications();
-      if (response.status === 'success') {
+      if (response && response.status === 'success') {
         setNotifications(response.notifications || []);
-        setUnreadCount(response.unread_count || 0);
+        setUnreadCount(Math.max(0, response.unread_count || 0));
       }
-    } catch (err) {
-      // Ignore background fetch errors
+    } catch {
+      // Background fetch errors ignored gracefully
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeToken]);
 
   useEffect(() => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 15000);
     return () => clearInterval(interval);
-  }, [location.pathname, token, citizenGrievanceId]);
+  }, [fetchNotifications, location.pathname]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -69,27 +96,39 @@ export default function Navbar() {
 
   const handleMarkAsRead = async (e, id) => {
     e.stopPropagation();
+    if (markingReadId === id) return;
     try {
+      setMarkingReadId(id);
       await apiService.markNotificationAsRead(id);
-      fetchNotifications();
+      await fetchNotifications();
     } catch (err) {
-      console.error(err);
+      console.error('Failed to mark notification as read:', err);
+    } finally {
+      setMarkingReadId(null);
     }
   };
 
   const handleMarkAllAsRead = async () => {
+    if (markingAllRead) return;
     try {
+      setMarkingAllRead(true);
       await apiService.markAllNotificationsAsRead();
-      fetchNotifications();
+      await fetchNotifications();
     } catch (err) {
-      console.error(err);
+      console.error('Failed to mark all notifications as read:', err);
+    } finally {
+      setMarkingAllRead(false);
     }
   };
 
   const handleNotificationClick = (notif) => {
     setShowDropdown(false);
+    if (!notif.is_read) {
+      apiService.markNotificationAsRead(notif.id).catch(() => {});
+    }
+
     if (notif.grievance_id) {
-      if (token) {
+      if (adminToken) {
         navigate(`/admin/dashboard?search=${encodeURIComponent(notif.grievance_id)}`);
       } else {
         navigate(`/history?id=${encodeURIComponent(notif.grievance_id)}`);
@@ -107,23 +146,69 @@ export default function Navbar() {
 
   const isActive = (path) => location.pathname === path;
 
-  const getNotifIcon = (type) => {
-    switch (type) {
-      case 'SLA_BREACHED':
-      case 'COMPLAINT_ESCALATED':
-        return <AlertCircle size={16} className="text-rose-600 shrink-0" />;
-      case 'SLA_APPROACHING':
-      case 'DUPLICATE_DETECTED':
-        return <AlertTriangle size={16} className="text-amber-500 shrink-0" />;
-      case 'COMPLAINT_RESOLVED':
-        return <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />;
-      default:
-        return <Info size={16} className="text-blue-600 shrink-0" />;
+  // Type-specific icons & visual priority styling
+  const getNotifIconAndStyle = (type, title = '') => {
+    const titleUpper = title.toUpperCase();
+
+    if (type === 'SLA_BREACHED' || titleUpper.includes('SLA BREACH')) {
+      return {
+        icon: <Clock size={16} className="text-rose-600 shrink-0" />,
+        accentClass: 'border-l-rose-500 bg-rose-50/70',
+        badgeClass: 'bg-rose-100 text-rose-800 border-rose-200',
+        label: 'SLA Breach',
+      };
     }
+    if (type === 'COMPLAINT_ESCALATED' || titleUpper.includes('ESCALATED')) {
+      return {
+        icon: <Flame size={16} className="text-amber-600 shrink-0" />,
+        accentClass: 'border-l-amber-500 bg-amber-50/70',
+        badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
+        label: 'Escalated',
+      };
+    }
+    if (type === 'DUPLICATE_DETECTED' || titleUpper.includes('DUPLICATE')) {
+      return {
+        icon: <Copy size={16} className="text-purple-600 shrink-0" />,
+        accentClass: 'border-l-purple-500 bg-purple-50/70',
+        badgeClass: 'bg-purple-100 text-purple-800 border-purple-200',
+        label: 'Duplicate',
+      };
+    }
+    if (type === 'COMPLAINT_RESOLVED' || titleUpper.includes('RESOLVED')) {
+      return {
+        icon: <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />,
+        accentClass: 'border-l-emerald-500 bg-emerald-50/70',
+        badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        label: 'Resolved',
+      };
+    }
+    if (type === 'COMPLAINT_REOPENED' || titleUpper.includes('REOPENED')) {
+      return {
+        icon: <ShieldAlert size={16} className="text-rose-600 shrink-0" />,
+        accentClass: 'border-l-rose-500 bg-rose-50/70',
+        badgeClass: 'bg-rose-100 text-rose-800 border-rose-200',
+        label: 'Reopened',
+      };
+    }
+    if (type === 'SLA_APPROACHING' || titleUpper.includes('NEAR DEADLINE')) {
+      return {
+        icon: <AlertTriangle size={16} className="text-amber-500 shrink-0" />,
+        accentClass: 'border-l-amber-500 bg-amber-50/70',
+        badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
+        label: 'Near Deadline',
+      };
+    }
+
+    return {
+      icon: <Info size={16} className="text-[#1E40AF] shrink-0" />,
+      accentClass: 'border-l-[#1E40AF] bg-blue-50/50',
+      badgeClass: 'bg-blue-100 text-[#1E40AF] border-blue-200',
+      label: 'Update',
+    };
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-slate-300 bg-white">
+    <header className="sticky top-0 z-50 w-full border-b border-slate-300 bg-white shadow-2xs">
       {/* Government Top Utility Bar */}
       <div className="bg-[#1e293b] text-slate-200 text-[11px] py-1.5 px-4 md:px-8 border-b border-slate-700">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -145,16 +230,16 @@ export default function Navbar() {
       </div>
 
       {/* Main Branding & Navigation Bar */}
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
-        <Link to="/" className="flex items-center gap-3">
-          <div className="rounded bg-[#1E40AF] p-2.5 text-white">
-            <Building2 size={24} />
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 md:px-8">
+        <Link to="/" className="flex items-center gap-2.5 sm:gap-3">
+          <div className="rounded-lg bg-[#1E40AF] p-2 sm:p-2.5 text-white shadow-xs shrink-0">
+            <Building2 size={20} className="sm:w-6 sm:h-6" />
           </div>
           <div className="leading-tight">
-            <h1 className="text-base font-bold tracking-tight text-[#1E40AF]">
+            <h1 className="text-xs sm:text-base font-extrabold tracking-tight text-[#1E40AF]">
               AI Smart Public Grievance Management System
             </h1>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] sm:tracking-[0.18em] text-slate-500">
               National Citizen Services Portal
             </p>
           </div>
@@ -210,87 +295,128 @@ export default function Navbar() {
           </a>
         </div>
 
-        {/* Right Side Buttons & Notification Bell */}
+        {/* Right Side Controls & Notification Center Bell */}
         <div className="flex items-center gap-3">
-          {/* Notification Bell Icon Dropdown */}
-          {(token || citizenGrievanceId) && (
+          {activeToken && (
             <div className="relative" ref={dropdownRef}>
               <button
+                type="button"
                 onClick={() => {
                   setShowDropdown(!showDropdown);
                   if (!showDropdown) fetchNotifications();
                 }}
-                className="relative rounded-full p-2 text-slate-600 hover:bg-slate-100 hover:text-[#1E40AF] transition focus:outline-none"
-                title="Notifications"
+                className="relative rounded-full p-2 text-slate-600 hover:bg-slate-100 hover:text-[#1E40AF] transition focus:outline-none cursor-pointer"
+                aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+                aria-expanded={showDropdown}
+                aria-haspopup="true"
                 id="notification-bell"
               >
                 <Bell size={20} />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-[10px] font-bold text-white shadow-sm animate-pulse">
+                  <span className="absolute -top-0.5 -right-0.5 flex h-5 min-w-5 px-1 items-center justify-center rounded-full bg-rose-600 text-[10px] font-bold text-white shadow-xs animate-pulse">
                     {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
               </button>
 
+              {/* Enhanced Notification Dropdown Panel */}
               {showDropdown && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-lg border border-slate-200 bg-white shadow-xl z-50 overflow-hidden">
-                  <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] sm:w-96 rounded-xl border border-slate-200 bg-white shadow-2xl z-50 overflow-hidden transition-all">
+                  {/* Header */}
+                  <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/90 px-4 py-3">
                     <div className="flex items-center gap-2">
                       <Bell size={16} className="text-[#1E40AF]" />
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                        Notifications {unreadCount > 0 && `(${unreadCount} Unread)`}
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">
+                        Notifications
                       </h3>
+                      {unreadCount > 0 && (
+                        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-extrabold text-rose-700 border border-rose-200">
+                          {unreadCount} unread
+                        </span>
+                      )}
                     </div>
                     {unreadCount > 0 && (
                       <button
+                        type="button"
                         onClick={handleMarkAllAsRead}
-                        className="flex items-center gap-1 text-[11px] font-bold text-[#1E40AF] hover:underline"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1E40AF] hover:text-[#16327e] hover:underline cursor-pointer"
                       >
-                        <CheckCheck size={14} /> Mark all read
+                        <CheckCheck size={14} />
+                        <span>Mark all read</span>
                       </button>
                     )}
                   </div>
 
-                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                  {/* List Container */}
+                  <div className="max-h-[75vh] sm:max-h-96 overflow-y-auto divide-y divide-slate-100">
                     {loading && notifications.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-slate-500">Loading notifications...</div>
+                      <div className="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
+                        <RefreshCw size={18} className="animate-spin text-[#1E40AF]" />
+                        <span>Loading notification center...</span>
+                      </div>
                     ) : notifications.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-slate-500">No notifications available</div>
+                      <div className="p-8 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
+                        <AlertCircle size={24} className="text-slate-300" />
+                        <span className="font-semibold text-slate-700">No notifications available</span>
+                        <p className="text-[11px] text-slate-400">Updates regarding your complaints will appear here.</p>
+                      </div>
                     ) : (
-                      notifications.map((notif) => (
-                        <div
-                          key={notif.id}
-                          onClick={() => handleNotificationClick(notif)}
-                          className={`p-3.5 flex gap-3 transition cursor-pointer hover:bg-slate-50 ${
-                            !notif.is_read ? 'bg-blue-50/50 font-medium' : 'bg-white text-slate-600'
-                          }`}
-                        >
-                          {getNotifIcon(notif.notification_type)}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-1">
-                              <h4 className="text-xs font-bold text-slate-900 truncate">{notif.title}</h4>
-                              <span className="text-[10px] text-slate-400 shrink-0">
-                                {notif.created_at ? new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                              </span>
+                      notifications.map((notif) => {
+                        const styleInfo = getNotifIconAndStyle(notif.notification_type, notif.title);
+                        const isUnread = !notif.is_read;
+
+                        return (
+                          <div
+                            key={notif.id}
+                            onClick={() => handleNotificationClick(notif)}
+                            className={`p-3.5 flex items-start gap-3 border-l-4 transition cursor-pointer hover:bg-slate-50 ${
+                              isUnread ? styleInfo.accentClass : 'border-l-transparent bg-white opacity-85'
+                            }`}
+                          >
+                            <div className="mt-0.5 shrink-0">{styleInfo.icon}</div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1 mb-0.5">
+                                <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.2 rounded border ${styleInfo.badgeClass}`}>
+                                  {styleInfo.label}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                                  {formatTimeAgo(notif.created_at)}
+                                </span>
+                              </div>
+
+                              <h4 className={`text-xs ${isUnread ? 'font-extrabold text-slate-900' : 'font-semibold text-slate-700'} truncate`}>
+                                {notif.title}
+                              </h4>
+
+                              <p className="text-[11px] text-slate-600 mt-1 line-clamp-2 leading-relaxed">
+                                {notif.message}
+                              </p>
+
+                              {notif.grievance_id && (
+                                <div className="mt-1.5 flex items-center justify-between">
+                                  <span className="inline-flex items-center gap-1 font-mono text-[10px] font-extrabold text-[#1E40AF] bg-blue-100/70 px-1.5 py-0.5 rounded">
+                                    {notif.grievance_id}
+                                  </span>
+                                  <span className="text-[10px] text-[#1E40AF] font-bold hover:underline">View details →</span>
+                                </div>
+                              )}
                             </div>
-                            <p className="text-xs text-slate-600 mt-0.5 line-clamp-2 leading-relaxed">{notif.message}</p>
-                            {notif.grievance_id && (
-                              <span className="inline-block mt-1 text-[10px] font-semibold text-[#1E40AF] bg-blue-100/70 px-1.5 py-0.5 rounded">
-                                {notif.grievance_id}
-                              </span>
+
+                            {isUnread && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleMarkAsRead(e, notif.id)}
+                                className="mt-0.5 p-1 text-slate-400 hover:text-[#1E40AF] hover:bg-blue-100/50 rounded transition"
+                                title="Mark as read"
+                                aria-label="Mark notification as read"
+                              >
+                                <CheckCheck size={14} />
+                              </button>
                             )}
                           </div>
-                          {!notif.is_read && (
-                            <button
-                              onClick={(e) => handleMarkAsRead(e, notif.id)}
-                              className="self-center p-1 text-slate-400 hover:text-blue-600 transition"
-                              title="Mark as read"
-                            >
-                              <CheckCheck size={14} />
-                            </button>
-                          )}
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -298,17 +424,17 @@ export default function Navbar() {
             </div>
           )}
 
-          {!token ? (
+          {!adminToken ? (
             <>
               <Link
                 to="/admin/login"
-                className="hidden items-center gap-1.5 rounded border border-slate-300 px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition sm:inline-flex"
+                className="hidden items-center gap-1.5 rounded-lg border border-slate-300 px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition sm:inline-flex"
               >
                 <LogIn size={14} /> Employee Access
               </Link>
               <Link
                 to="/submit"
-                className="inline-flex items-center gap-1.5 rounded bg-[#1E40AF] px-4 py-1.5 text-xs font-bold text-white hover:bg-[#16327e] transition shadow-sm"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E40AF] px-4 py-1.5 text-xs font-bold text-white hover:bg-[#16327e] transition shadow-xs"
               >
                 <UserPlus size={14} /> Register Grievance
               </Link>
@@ -317,13 +443,14 @@ export default function Navbar() {
             <div className="flex items-center gap-2">
               <Link
                 to="/admin/dashboard"
-                className="hidden items-center gap-1.5 rounded border border-slate-300 px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition sm:inline-flex"
+                className="hidden items-center gap-1.5 rounded-lg border border-slate-300 px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition sm:inline-flex"
               >
                 <CircleUserRound size={14} className="text-[#1E40AF]" /> Admin Profile
               </Link>
               <button
+                type="button"
                 onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 rounded border border-slate-300 px-3.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition cursor-pointer"
               >
                 <LogOut size={14} /> Logout
               </button>
@@ -332,8 +459,8 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Mobile Menu */}
-      <div className="flex items-center justify-around border-t border-slate-200 bg-slate-50 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600 lg:hidden">
+      {/* Mobile Bottom Navigation */}
+      <div className="flex items-center justify-around border-t border-slate-200 bg-slate-50 px-2 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600 lg:hidden">
         <Link to="/" className={`flex flex-col items-center gap-0.5 ${isActive('/') ? 'text-[#1E40AF]' : ''}`}>
           <House size={16} /> Home
         </Link>
@@ -343,11 +470,18 @@ export default function Navbar() {
         <Link to="/history" className={`flex flex-col items-center gap-0.5 ${isActive('/history') ? 'text-[#1E40AF]' : ''}`}>
           <SearchCheck size={16} /> Track
         </Link>
-        <a href="#contact" className="flex flex-col items-center gap-0.5">
-          <PhoneCall size={16} /> Contact
-        </a>
+        {adminToken ? (
+          <Link to="/admin/dashboard" className={`flex flex-col items-center gap-0.5 ${isActive('/admin/dashboard') ? 'text-[#1E40AF]' : ''}`}>
+            <LayoutDashboard size={16} /> Dashboard
+          </Link>
+        ) : (
+          <a href="#contact" className="flex flex-col items-center gap-0.5">
+            <PhoneCall size={16} /> Contact
+          </a>
+        )}
       </div>
     </header>
   );
 }
+
 

@@ -1,11 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { apiService } from '../services/api';
-import { Sparkles, Send, ShieldAlert, BadgeInfo, AlertCircle, CheckCircle2, RefreshCw, Upload } from 'lucide-react';
+import {
+  Sparkles,
+  Send,
+  ShieldAlert,
+  BadgeInfo,
+  AlertCircle,
+  CheckCircle2,
+  RefreshCw,
+  Upload,
+  Copy,
+  Check,
+  Droplets,
+  Zap,
+  Construction,
+  Trash2,
+  Building2,
+  ArrowRight,
+  X,
+  FileText,
+  MapPin,
+  Phone,
+  Mail,
+  User,
+  ShieldCheck,
+} from 'lucide-react';
 
 export default function SubmitComplaint() {
   const routeLocation = useLocation();
-  
+
   // Form fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -17,66 +41,139 @@ export default function SubmitComplaint() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
 
-  // Status states
+  // Status & Validation states
   const [analyzing, setAnalyzing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [prediction, setPrediction] = useState(null);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [success, setSuccess] = useState(null);
+  const [copiedId, setCopiedId] = useState(false);
+
+  // Category definitions with icons and descriptions
+  const categories = [
+    {
+      id: 'Water',
+      name: 'Water Supply',
+      icon: Droplets,
+      desc: 'Leakage, supply issues, contaminated water',
+      color: 'blue',
+    },
+    {
+      id: 'Electricity',
+      name: 'Electricity Board',
+      icon: Zap,
+      desc: 'Power cuts, dangerous wiring, meter issues',
+      color: 'amber',
+    },
+    {
+      id: 'Road',
+      name: 'Roads & Works',
+      icon: Construction,
+      desc: 'Potholes, broken roads, streetlights',
+      color: 'emerald',
+    },
+    {
+      id: 'Garbage',
+      name: 'Garbage & Cleanliness',
+      icon: Trash2,
+      desc: 'Waste dump, uncleaned bins, sanitation',
+      color: 'purple',
+    },
+    {
+      id: 'Others',
+      name: 'Others / General',
+      icon: Building2,
+      desc: 'Public amenities, noise, other civic issues',
+      color: 'slate',
+    },
+  ];
 
   // Auto-fill department if query param exists
   useEffect(() => {
     const params = new URLSearchParams(routeLocation.search);
     const deptParam = params.get('dept');
     if (deptParam) {
-      const validDepts = ['Water', 'Electricity', 'Road', 'Garbage', 'Others'];
-      if (validDepts.includes(deptParam)) {
-        setDepartment(deptParam);
-      }
+      if (deptParam.includes('Water')) setDepartment('Water');
+      else if (deptParam.includes('Electricity') || deptParam.includes('Power')) setDepartment('Electricity');
+      else if (deptParam.includes('Road')) setDepartment('Road');
+      else if (deptParam.includes('Garbage') || deptParam.includes('Waste')) setDepartment('Garbage');
+      else if (['Water', 'Electricity', 'Road', 'Garbage', 'Others'].includes(deptParam)) setDepartment(deptParam);
     }
-  }, [routeLocation]);
+  }, [routeLocation.search]);
+
+  const clearFieldError = (fieldName) => {
+    if (fieldErrors[fieldName]) {
+      setFieldErrors((prev) => ({ ...prev, [fieldName]: '' }));
+    }
+    if (error) setError('');
+  };
 
   const handleImageChange = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (file) {
+      const maxMB = 5;
+      if (file.size > maxMB * 1024 * 1024) {
+        setError(`Selected file exceeds ${maxMB}MB limit. Please upload a smaller image.`);
+        return;
+      }
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+      if (file.type && !allowedTypes.includes(file.type.toLowerCase())) {
+        setError('Invalid file type. Please select a valid photo attachment (JPG, PNG, WEBP).');
+        return;
+      }
       setImageFile(file);
+      setError('');
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result);
+      };
+      reader.onerror = () => {
+        setError('Failed to read selected image file.');
       };
       reader.readAsDataURL(file);
     }
   };
 
+  const removeImage = () => {
+    setImageFile(null);
+    setImagePreview('');
+  };
+
   const validateForm = () => {
+    const errors = {};
     if (!name.trim()) {
-      setError('Citizen Name is required.');
-      return false;
+      errors.name = 'Citizen Full Name is required.';
     }
-    if (!email.trim() || !/\S+@\S+\.\S+/.test(email)) {
-      setError('Please enter a valid email address.');
-      return false;
+    if (!email.trim()) {
+      errors.email = 'Email address is required.';
+    } else if (!/\S+@\S+\.\S+/.test(email)) {
+      errors.email = 'Please enter a valid email address.';
     }
-    if (!phone.trim() || phone.replace(/\D/g, '').length < 10) {
-      setError('Please enter a valid 10-digit phone number.');
-      return false;
+    if (!phone.trim()) {
+      errors.phone = 'Mobile number is required.';
+    } else if (phone.replace(/\D/g, '').length < 10) {
+      errors.phone = 'Please enter a valid 10-digit mobile number.';
     }
     if (!title.trim()) {
-      setError('Complaint Title is required.');
-      return false;
+      errors.title = 'Complaint title is required.';
     }
     if (!complaintText.trim()) {
-      setError('Please describe your grievance.');
-      return false;
-    }
-    if (complaintText.trim().length < 15) {
-      setError('Please provide a more detailed description (at least 15 characters).');
-      return false;
+      errors.complaintText = 'Please describe your grievance in detail.';
+    } else if (complaintText.trim().length < 15) {
+      errors.complaintText = 'Please provide more details (minimum 15 characters).';
     }
     if (!location.trim()) {
-      setError('Grievance Location/Address is required.');
+      errors.location = 'Location or address of the grievance is required.';
+    }
+
+    setFieldErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      setError('Please resolve the highlighted validation errors before submitting.');
       return false;
     }
+
     setError('');
     return true;
   };
@@ -84,20 +181,28 @@ export default function SubmitComplaint() {
   const handleAnalyze = async (e) => {
     e.preventDefault();
     if (!complaintText.trim() || complaintText.trim().length < 15) {
-      setError('Please enter detailed description (at least 15 characters) before analyzing.');
+      setFieldErrors((prev) => ({
+        ...prev,
+        complaintText: 'Enter detailed description (at least 15 characters) before AI analysis.',
+      }));
+      setError('Please provide a detailed grievance description before analyzing with AI.');
       return;
     }
 
     setAnalyzing(true);
     setPrediction(null);
     setSuccess(null);
+    setError('');
+
     try {
       const response = await apiService.predict(complaintText);
       if (response.status === 'success') {
         setPrediction(response.data);
-        // Pre-select the predicted department if matches
         if (response.data.category) {
-          setDepartment(response.data.category);
+          const validDepts = ['Water', 'Electricity', 'Road', 'Garbage', 'Others'];
+          if (validDepts.includes(response.data.category)) {
+            setDepartment(response.data.category);
+          }
         }
       } else {
         setError('Prediction model returned an invalid response.');
@@ -115,13 +220,14 @@ export default function SubmitComplaint() {
 
     setSubmitting(true);
     setError('');
-    
-    // Consolidate the form fields into complaint_text column to prevent backend schema breaking
-    const consolidatedText = `TITLE: ${title.trim()}\n` +
-                             `LOCATION: ${location.trim()}\n` +
-                             `CITIZEN: ${name.trim()} (Phone: ${phone.trim()}, Email: ${email.trim()})\n` +
-                             `ATTACHMENT: ${imageFile ? imageFile.name : 'None'}\n\n` +
-                             `DESCRIPTION:\n${complaintText.trim()}`;
+
+    // Consolidate form fields into complaint_text column to preserve existing backend schema contract
+    const consolidatedText =
+      `TITLE: ${title.trim()}\n` +
+      `LOCATION: ${location.trim()}\n` +
+      `CITIZEN: ${name.trim()} (Phone: ${phone.trim()}, Email: ${email.trim()})\n` +
+      `ATTACHMENT: ${imageFile ? imageFile.name : 'None'}\n\n` +
+      `DESCRIPTION:\n${complaintText.trim()}`;
 
     const payload = {
       complaint_text: consolidatedText,
@@ -140,10 +246,12 @@ export default function SubmitComplaint() {
         if (response.token) {
           localStorage.setItem('citizen_token', response.token);
         }
-        if (response.complaint?.grievance_id) {
-          localStorage.setItem('last_grievance_id', response.complaint.grievance_id);
+        const gId = response.complaint?.grievance_id || response.complaint?.id;
+        if (gId) {
+          localStorage.setItem('last_grievance_id', gId);
         }
-        // Clear all fields
+
+        // Reset form
         setName('');
         setEmail('');
         setPhone('');
@@ -153,301 +261,609 @@ export default function SubmitComplaint() {
         setImageFile(null);
         setImagePreview('');
         setPrediction(null);
+        setFieldErrors({});
+
+        // Scroll to top smoothly so citizen sees success card immediately
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        setError('Grievance submission failed.');
+        setError('Grievance submission failed. Please check your information and try again.');
       }
     } catch (err) {
-      setError(err.message || 'Failed to submit grievance to the database.');
+      setError(err.message || 'Failed to submit grievance to the public database. Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const getCategoryBadgeClass = (cat) => {
-    const mapping = {
-      Water: 'bg-blue-50 text-[#1E40AF] border-blue-300',
-      Electricity: 'bg-orange-50 text-[#EA580C] border-orange-300',
-      Road: 'bg-green-50 text-[#16A34A] border-green-300',
-      Garbage: 'bg-slate-100 text-slate-700 border-slate-300',
-      Others: 'bg-slate-100 text-slate-600 border-slate-300',
-    };
-    return mapping[cat] || 'bg-slate-100 text-slate-600 border-slate-300';
+  const handleCopyGrievanceId = (id) => {
+    if (!id) return;
+    navigator.clipboard.writeText(id);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
   };
 
   const getPriorityBadgeClass = (pri) => {
     const mapping = {
-      High: 'bg-red-50 text-[#DC2626] border-red-300',
-      Medium: 'bg-orange-50 text-[#EA580C] border-orange-300',
-      Low: 'bg-green-50 text-[#16A34A] border-green-300',
+      High: 'bg-rose-100 text-rose-800 border-rose-300 font-bold',
+      Medium: 'bg-amber-100 text-amber-800 border-amber-300 font-bold',
+      Low: 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold',
     };
-    return mapping[pri] || 'bg-slate-100 text-slate-600 border-slate-300';
+    return mapping[pri] || 'bg-slate-100 text-slate-700 border-slate-300 font-semibold';
   };
 
   const getFrustrationPercentage = (score) => {
+    if (score === undefined || score === null) return 50;
     if (score >= 0) {
       return Math.round((1 - score) * 30);
     }
-    return Math.round(30 + (Math.abs(score) * 70));
+    return Math.round(30 + Math.abs(score) * 70);
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-12 md:px-8">
-      {/* Title */}
-      <div className="mb-8 border-b border-slate-300 pb-4 text-center">
-        <h2 className="text-2xl font-extrabold text-slate-900 md:text-3xl">Lodge New Public Grievance</h2>
-        <p className="mx-auto mt-2 max-w-2xl text-xs text-slate-600">
-          Please fill out the form below. The system automatically processes the description to suggest routing, and routes it directly to municipal officers.
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 md:py-12">
+      {/* Page Title & Breadcrumb Header */}
+      <div className="mb-8 text-center md:text-left">
+        <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-[#1E40AF]">
+          <ShieldCheck size={14} /> Official Public Grievance Portal
+        </div>
+        <h1 className="mt-3 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+          Submit Public Grievance
+        </h1>
+        <p className="mt-1.5 text-xs sm:text-sm text-slate-600 max-w-3xl">
+          File an official public complaint. Our AI classifier automatically routes your grievance directly to the assigned department for SLA-monitored resolution.
         </p>
       </div>
 
-      {/* Success Banner */}
+      {/* Success Banner Card */}
       {success && (
-        <div className="mb-8 rounded border border-emerald-300 bg-emerald-50 p-6 shadow-sm">
-          <div className="flex gap-3">
-            <CheckCircle2 size={24} className="text-[#16A34A] shrink-0" />
+        <div className="mb-8 rounded-xl border border-emerald-300 bg-emerald-50/80 p-6 shadow-md backdrop-blur transition-all">
+          <div className="flex items-start gap-4">
+            <div className="rounded-full bg-emerald-600 p-2 text-white shrink-0 shadow">
+              <CheckCircle2 size={24} />
+            </div>
             <div className="flex-1">
-              <h4 className="text-sm font-bold text-emerald-800">Grievance Submitted Successfully</h4>
-              <p className="mt-1 text-xs text-emerald-700 leading-normal">
-                Your ticket has been logged into the public ledger database. Keep your Reference ID to track progress.
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-base font-bold text-emerald-900">
+                  Grievance Submitted Successfully
+                </h3>
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-200/80 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                  Status: PENDING
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-emerald-800 leading-relaxed">
+                Your grievance has been logged into the public registry. Keep your reference ID safe to track progress.
               </p>
-              <div className="mt-4 grid gap-4 rounded border border-emerald-200 bg-white p-4 text-xs md:grid-cols-3">
-                <div>
-                  <span className="block text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Reference ID</span>
-                  <span className="font-mono font-bold text-slate-900 select-all">{success.grievance_id || success.id}</span>
+
+              {/* Grievance ID Display Card */}
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Official Grievance Reference ID
+                    </span>
+                    <span className="font-mono text-xl font-extrabold text-[#1E40AF] tracking-wide select-all">
+                      {success.grievance_id || success.id}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyGrievanceId(success.grievance_id || success.id)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors active:scale-95"
+                  >
+                    {copiedId ? (
+                      <>
+                        <Check size={14} className="text-emerald-600" />
+                        <span className="text-emerald-700 font-bold">Copied ID!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={14} className="text-slate-500" />
+                        <span>Copy ID</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-                <div>
-                  <span className="block text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Assigned Department</span>
-                  <span className="font-bold text-[#1E40AF]">{success.department || success.category}</span>
-                </div>
-                <div>
-                  <span className="block text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Initial Priority</span>
-                  <span className="font-bold text-[#DC2626]">{success.priority}</span>
+
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase text-slate-500">Assigned Department</span>
+                    <span className="font-bold text-slate-800">{success.department || success.category}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase text-slate-500">Assigned Priority</span>
+                    <span className={`inline-block mt-0.5 rounded px-2 py-0.5 text-[11px] ${getPriorityBadgeClass(success.priority)}`}>
+                      {success.priority} Priority
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase text-slate-500">Submission Date</span>
+                    <span className="font-medium text-slate-700">
+                      {success.timestamp ? new Date(success.timestamp).toLocaleDateString() : 'Today'}
+                    </span>
+                  </div>
                 </div>
               </div>
-              {success.related_grievances?.length > 0 && (
-                <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
-                  <p className="font-bold">Possible related grievance</p>
+
+              {/* Similar / Related Grievance Alert */}
+              {success.related_grievances && success.related_grievances.length > 0 && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-900">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                    <ShieldAlert size={16} className="text-amber-600" />
+                    <span>Similar Grievance Detected</span>
+                  </div>
                   {success.related_grievances.map((related) => (
-                    <p key={related.related_grievance_id} className="mt-1">
-                      {related.related_grievance_id} · {related.similarity_score}% similar · {related.category} · {related.status}
+                    <p key={related.related_grievance_id} className="mt-1 text-amber-800">
+                      Ticket <strong className="font-mono">{related.related_grievance_id}</strong> is {related.similarity_score}% similar ({related.category} · {related.status}).
                     </p>
                   ))}
-                  <p className="mt-2 text-[10px] text-amber-700">This is a recommendation for administrative review. Your grievance was still created normally.</p>
+                  <p className="mt-1.5 text-[10px] text-amber-700">
+                    This notice helps administrators deduplicate issues. Your grievance has been recorded normally.
+                  </p>
                 </div>
+              )}
+
+              {/* Actions */}
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  to={`/history?id=${encodeURIComponent(success.grievance_id || success.id)}`}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#1E40AF] px-4 py-2 text-xs font-bold text-white shadow hover:bg-[#16327e] transition-colors"
+                >
+                  <span>Track Complaint Progress</span>
+                  <ArrowRight size={14} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setSuccess(null)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Lodge Another Complaint
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Error Banner */}
+      {error && (
+        <div className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-rose-300 bg-rose-50 p-4 text-xs text-rose-800 shadow-sm">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertCircle size={16} className="shrink-0 text-rose-600" />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setError('')}
+            className="text-rose-500 hover:text-rose-700 p-0.5 rounded"
+            aria-label="Dismiss error"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Grievance Submission Form */}
+      <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-white p-5 sm:p-8 shadow-sm">
+        {/* Section 1: Citizen Contact Info */}
+        <div className="mb-8 border-b border-slate-200 pb-6">
+          <div className="mb-4 flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E40AF] text-xs font-bold text-white">
+              1
+            </span>
+            <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-900">
+              Citizen Contact Information
+            </h2>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-3">
+            {/* Full Name */}
+            <div>
+              <label htmlFor="name" className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>Citizen Full Name <span className="text-rose-500">*</span></span>
+              </label>
+              <div className="relative">
+                <input
+                  id="name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    clearFieldError('name');
+                  }}
+                  placeholder="e.g. Rahul Sharma"
+                  className={`w-full rounded-lg border px-3 py-2.5 pl-9 text-xs text-slate-900 outline-none transition-all ${
+                    fieldErrors.name
+                      ? 'border-rose-400 bg-rose-50/20 focus:border-rose-500 focus:ring-2 focus:ring-rose-200'
+                      : 'border-slate-300 bg-slate-50 focus:border-[#1E40AF] focus:bg-white focus:ring-2 focus:ring-blue-100'
+                  }`}
+                />
+                <User size={14} className="absolute left-3 top-3 text-slate-400" />
+              </div>
+              {fieldErrors.name && (
+                <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                  <AlertCircle size={12} /> {fieldErrors.name}
+                </p>
+              )}
+            </div>
+
+            {/* Email */}
+            <div>
+              <label htmlFor="email" className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>Email Address <span className="text-rose-500">*</span></span>
+              </label>
+              <div className="relative">
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    clearFieldError('email');
+                  }}
+                  placeholder="rahul@example.com"
+                  className={`w-full rounded-lg border px-3 py-2.5 pl-9 text-xs text-slate-900 outline-none transition-all ${
+                    fieldErrors.email
+                      ? 'border-rose-400 bg-rose-50/20 focus:border-rose-500 focus:ring-2 focus:ring-rose-200'
+                      : 'border-slate-300 bg-slate-50 focus:border-[#1E40AF] focus:bg-white focus:ring-2 focus:ring-blue-100'
+                  }`}
+                />
+                <Mail size={14} className="absolute left-3 top-3 text-slate-400" />
+              </div>
+              {fieldErrors.email && (
+                <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                  <AlertCircle size={12} /> {fieldErrors.email}
+                </p>
+              )}
+            </div>
+
+            {/* Mobile Number */}
+            <div>
+              <label htmlFor="phone" className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>Mobile Number <span className="text-rose-500">*</span></span>
+              </label>
+              <div className="relative">
+                <input
+                  id="phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    clearFieldError('phone');
+                  }}
+                  placeholder="9876543210"
+                  className={`w-full rounded-lg border px-3 py-2.5 pl-9 text-xs text-slate-900 outline-none transition-all ${
+                    fieldErrors.phone
+                      ? 'border-rose-400 bg-rose-50/20 focus:border-rose-500 focus:ring-2 focus:ring-rose-200'
+                      : 'border-slate-300 bg-slate-50 focus:border-[#1E40AF] focus:bg-white focus:ring-2 focus:ring-blue-100'
+                  }`}
+                />
+                <Phone size={14} className="absolute left-3 top-3 text-slate-400" />
+              </div>
+              {fieldErrors.phone && (
+                <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                  <AlertCircle size={12} /> {fieldErrors.phone}
+                </p>
               )}
             </div>
           </div>
         </div>
-      )}
 
-      {/* Error Alert */}
-      {error && (
-        <div className="mb-6 flex items-center gap-3 rounded border border-rose-300 bg-rose-50 p-4 text-xs font-semibold text-rose-700 shadow-sm">
-          <AlertCircle size={16} className="shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Grievance Form */}
-      <form onSubmit={handleSubmit} className="rounded-lg border border-slate-300 bg-white p-6 shadow-sm">
-        {/* Step 1: Citizen details */}
-        <div className="mb-6 border-b border-slate-200 pb-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-[#1E40AF] mb-3">1. Citizen Contact Information</h3>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <label htmlFor="name" className="mb-1.5 block text-xs font-bold text-slate-700">Citizen Full Name *</label>
-              <input
-                id="name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Rahul Sharma"
-                className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white"
-              />
-            </div>
-            <div>
-              <label htmlFor="email" className="mb-1.5 block text-xs font-bold text-slate-700">Email Address *</label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="rahul@example.com"
-                className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white"
-              />
-            </div>
-            <div>
-              <label htmlFor="phone" className="mb-1.5 block text-xs font-bold text-slate-700">Mobile Number *</label>
-              <input
-                id="phone"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="9876543210"
-                className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white"
-              />
+        {/* Section 2: Grievance Details & Category Selection */}
+        <div className="mb-8 border-b border-slate-200 pb-6">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E40AF] text-xs font-bold text-white">
+                2
+              </span>
+              <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-900">
+                Grievance Details & Category
+              </h2>
             </div>
           </div>
-        </div>
 
-        {/* Step 2: Grievance details */}
-        <div className="mb-6 border-b border-slate-200 pb-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-[#1E40AF] mb-3">2. Grievance Details</h3>
-          <div className="grid gap-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="sm:col-span-2">
-                <label htmlFor="title" className="mb-1.5 block text-xs font-bold text-slate-700">Complaint Title *</label>
+          <div className="grid gap-6">
+            {/* Category Selector Cards */}
+            <div>
+              <label className="mb-2 block text-xs font-bold text-slate-700">
+                Select Complaint Category <span className="text-rose-500">*</span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                {categories.map((cat) => {
+                  const Icon = cat.icon;
+                  const isSelected = department === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setDepartment(cat.id);
+                        clearFieldError('department');
+                      }}
+                      className={`relative flex flex-col items-start rounded-xl border p-3.5 text-left transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-[#1E40AF] bg-blue-50/70 shadow-sm ring-2 ring-blue-500/20'
+                          : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-100/70'
+                      }`}
+                    >
+                      <div className="flex w-full items-center justify-between mb-2">
+                        <div
+                          className={`rounded-lg p-2 ${
+                            isSelected ? 'bg-[#1E40AF] text-white' : 'bg-slate-200/80 text-slate-700'
+                          }`}
+                        >
+                          <Icon size={16} />
+                        </div>
+                        {isSelected && (
+                          <span className="rounded-full bg-[#1E40AF] p-0.5 text-white">
+                            <Check size={12} />
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`text-xs font-bold ${
+                          isSelected ? 'text-[#1E40AF]' : 'text-slate-800'
+                        }`}
+                      >
+                        {cat.name}
+                      </span>
+                      <span className="mt-1 text-[10px] text-slate-500 leading-tight">
+                        {cat.desc}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Title Input */}
+            <div>
+              <label htmlFor="title" className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>Complaint Title <span className="text-rose-500">*</span></span>
+              </label>
+              <div className="relative">
                 <input
                   id="title"
                   type="text"
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Summarize the issue (e.g. Water shortage in Block C)"
-                  className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white"
+                  onChange={(e) => {
+                    setTitle(e.target.value);
+                    clearFieldError('title');
+                  }}
+                  placeholder="Summarize the issue (e.g. Severe water pipe leakage in Ward 4)"
+                  className={`w-full rounded-lg border px-3 py-2.5 pl-9 text-xs text-slate-900 outline-none transition-all ${
+                    fieldErrors.title
+                      ? 'border-rose-400 bg-rose-50/20 focus:border-rose-500 focus:ring-2 focus:ring-rose-200'
+                      : 'border-slate-300 bg-slate-50 focus:border-[#1E40AF] focus:bg-white focus:ring-2 focus:ring-blue-100'
+                  }`}
                 />
+                <FileText size={14} className="absolute left-3 top-3 text-slate-400" />
               </div>
-              <div>
-                <label htmlFor="department" className="mb-1.5 block text-xs font-bold text-slate-700">Department Selection *</label>
-                <select
-                  id="department"
-                  value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                  className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white"
-                >
-                  <option value="Water">Water Department</option>
-                  <option value="Electricity">Electricity Board</option>
-                  <option value="Road">Roads & Infrastructure</option>
-                  <option value="Garbage">Garbage / Sanitation</option>
-                  <option value="Others">Others / Admin</option>
-                </select>
-              </div>
+              {fieldErrors.title && (
+                <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                  <AlertCircle size={12} /> {fieldErrors.title}
+                </p>
+              )}
             </div>
 
+            {/* Detailed Description Textarea */}
             <div>
-              <label htmlFor="complaint" className="mb-1.5 block text-xs font-bold text-slate-700">Detailed Description *</label>
+              <div className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+                <label htmlFor="complaint">
+                  Detailed Description <span className="text-rose-500">*</span>
+                </label>
+                <span className={`text-[10px] font-medium ${complaintText.length >= 15 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  {complaintText.length} / min 15 chars
+                </span>
+              </div>
               <textarea
                 id="complaint"
-                rows={6}
+                rows={5}
                 value={complaintText}
-                onChange={(e) => setComplaintText(e.target.value)}
-                placeholder="Please explain the problem clearly. Mention duration, impact, and other helpful context."
-                className="w-full resize-none rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white"
+                onChange={(e) => {
+                  setComplaintText(e.target.value);
+                  clearFieldError('complaintText');
+                }}
+                placeholder="Explain the grievance clearly. Include details such as duration of issue, safety impacts, or specific landmarks..."
+                className={`w-full resize-none rounded-lg border p-3 text-xs text-slate-900 outline-none transition-all ${
+                  fieldErrors.complaintText
+                    ? 'border-rose-400 bg-rose-50/20 focus:border-rose-500 focus:ring-2 focus:ring-rose-200'
+                    : 'border-slate-300 bg-slate-50 focus:border-[#1E40AF] focus:bg-white focus:ring-2 focus:ring-blue-100'
+                }`}
               />
-              <span className="mt-1.5 block text-[10px] text-slate-500 leading-normal">
-                Include street landmarks, block numbers, or specific points of reference. Minimum 15 characters.
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Step 3: Location and Image upload */}
-        <div className="mb-6">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-[#1E40AF] mb-3">3. Location & Supporting Image</h3>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="location" className="mb-1.5 block text-xs font-bold text-slate-700">Grievance Location/Address *</label>
-              <input
-                id="location"
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g. Flat 402, Sunshine Apts, Sector 12"
-                className="w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#1E40AF] focus:bg-white"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-bold text-slate-700">Upload Photo (Optional)</label>
-              <div className="flex gap-3">
-                <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100">
-                  <Upload size={14} className="text-slate-400" />
-                  <span>Choose file...</span>
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
-                </label>
-                {imagePreview && (
-                  <div className="h-9 w-9 overflow-hidden rounded border border-slate-300">
-                    <img src={imagePreview} alt="Preview" className="h-full w-full object-cover" />
-                  </div>
-                )}
-              </div>
-              {imageFile && (
-                <span className="mt-1 block text-[10px] text-slate-500 truncate">
-                  Selected: {imageFile.name} ({(imageFile.size / 1024).toFixed(1)} KB)
+              {fieldErrors.complaintText ? (
+                <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                  <AlertCircle size={12} /> {fieldErrors.complaintText}
+                </p>
+              ) : (
+                <span className="mt-1 block text-[10px] text-slate-500">
+                  Tip: Detailed descriptions allow our AI model to accurately detect priority and sentiment.
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Button Actions */}
-        <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+        {/* Section 3: Location & Attachments */}
+        <div className="mb-8">
+          <div className="mb-4 flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E40AF] text-xs font-bold text-white">
+              3
+            </span>
+            <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-900">
+              Location & Photo Proof
+            </h2>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            {/* Location */}
+            <div>
+              <label htmlFor="location" className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>Grievance Location / Address <span className="text-rose-500">*</span></span>
+              </label>
+              <div className="relative">
+                <input
+                  id="location"
+                  type="text"
+                  value={location}
+                  onChange={(e) => {
+                    setLocation(e.target.value);
+                    clearFieldError('location');
+                  }}
+                  placeholder="e.g. Near Community Center, Main Road, Sector 12"
+                  className={`w-full rounded-lg border px-3 py-2.5 pl-9 text-xs text-slate-900 outline-none transition-all ${
+                    fieldErrors.location
+                      ? 'border-rose-400 bg-rose-50/20 focus:border-rose-500 focus:ring-2 focus:ring-rose-200'
+                      : 'border-slate-300 bg-slate-50 focus:border-[#1E40AF] focus:bg-white focus:ring-2 focus:ring-blue-100'
+                  }`}
+                />
+                <MapPin size={14} className="absolute left-3 top-3 text-slate-400" />
+              </div>
+              {fieldErrors.location && (
+                <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                  <AlertCircle size={12} /> {fieldErrors.location}
+                </p>
+              )}
+            </div>
+
+            {/* Photo Attachment (Optional) */}
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                Upload Photo Proof (Optional)
+              </label>
+              {!imageFile ? (
+                <label className="flex h-[42px] cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 hover:border-[#1E40AF] hover:bg-blue-50/50 transition-all">
+                  <Upload size={14} className="text-slate-400" />
+                  <span>Choose file... (JPG, PNG)</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                </label>
+              ) : (
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
+                  <div className="flex items-center gap-2.5 overflow-hidden">
+                    {imagePreview && (
+                      <img src={imagePreview} alt="Preview" className="h-7 w-7 rounded object-cover border border-slate-300" />
+                    )}
+                    <span className="truncate text-slate-800 font-medium">{imageFile.name}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={removeImage}
+                    className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                    aria-label="Remove image"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 border-t border-slate-200 pt-6">
           <button
             type="button"
             onClick={handleAnalyze}
             disabled={analyzing || submitting}
-            className="inline-flex items-center justify-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-5 py-2.5 text-xs font-bold text-[#1E40AF] hover:bg-blue-100 hover:border-blue-300 disabled:opacity-50 transition-all cursor-pointer"
           >
-            {analyzing ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} className="text-[#1E40AF]" />}
-            Analyze with AI
+            {analyzing ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            <span>{analyzing ? 'Analyzing Text...' : 'Analyze with AI'}</span>
           </button>
+
           <button
             type="submit"
-            disabled={analyzing || submitting}
-            className="inline-flex items-center justify-center gap-1.5 rounded bg-[#1E40AF] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#16327e] disabled:opacity-50"
+            disabled={submitting || analyzing}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-[#1E40AF] px-6 py-2.5 text-xs font-bold text-white shadow hover:bg-[#16327e] disabled:opacity-50 transition-all cursor-pointer"
           >
-            {submitting ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-            Submit Grievance
+            {submitting ? (
+              <>
+                <RefreshCw size={15} className="animate-spin" />
+                <span>Submitting Grievance...</span>
+              </>
+            ) : (
+              <>
+                <Send size={15} />
+                <span>Submit Grievance</span>
+              </>
+            )}
           </button>
         </div>
       </form>
 
-      {/* AI Prediction Result Box Below Form */}
-      <div className="mt-6">
+      {/* AI Analysis Result Presentation Card */}
+      <div className="mt-8">
         {analyzing ? (
-          <div className="rounded border border-blue-200 bg-blue-50 p-6 text-center animate-pulse">
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-6 text-center shadow-sm animate-pulse">
             <RefreshCw size={24} className="mx-auto mb-2 animate-spin text-[#1E40AF]" />
-            <span className="text-xs font-bold text-[#1E40AF]">Processing grievance with NLP Classifier...</span>
+            <span className="text-xs font-bold text-[#1E40AF]">
+              Running Natural Language Processing model on description...
+            </span>
           </div>
         ) : prediction ? (
-          <div className="rounded border border-blue-300 bg-blue-50 p-5 shadow-sm">
-            <h4 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-[#1E40AF]">
-              <Sparkles size={14} /> Automated Routing Prediction
-            </h4>
-            <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
-              The embedded natural language AI classifier has analyzed the description text. The findings are compiled below:
+          <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50/80 to-white p-6 shadow-sm">
+            <div className="flex items-center justify-between border-b border-blue-100 pb-3">
+              <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-[#1E40AF]">
+                <Sparkles size={16} /> AI Routing & Sentiment Analysis
+              </div>
+              <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[10px] font-bold text-[#1E40AF]">
+                NLP Model Output
+              </span>
+            </div>
+
+            <p className="mt-3 text-xs leading-relaxed text-slate-600">
+              The embedded natural language AI classifier analyzed your grievance text and produced the following classification metrics:
             </p>
+
             <div className="mt-4 grid gap-4 sm:grid-cols-3">
-              <div className="rounded border border-slate-200 bg-white p-3">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Predicted Department</span>
-                <span className={`mt-1.5 inline-flex rounded border px-2 py-0.5 text-[10px] font-bold ${getCategoryBadgeClass(prediction.category)}`}>
+              {/* Category */}
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-2xs">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Predicted Category
+                </span>
+                <span className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-2.5 py-1 text-xs font-bold text-[#1E40AF] border border-blue-200">
                   {prediction.department || prediction.category}
                 </span>
               </div>
-              <div className="rounded border border-slate-200 bg-white p-3">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Suggested Severity Priority</span>
-                <span className={`mt-1.5 inline-flex rounded border px-2 py-0.5 text-[10px] font-bold ${getPriorityBadgeClass(prediction.priority)}`}>
+
+              {/* Priority Badge */}
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-2xs">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Detected Priority
+                </span>
+                <span className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs ${getPriorityBadgeClass(prediction.priority)}`}>
                   {prediction.priority} Priority
                 </span>
               </div>
-              <div className="rounded border border-slate-200 bg-white p-3">
+
+              {/* Frustration Score */}
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-2xs">
                 <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  <span>Citizen Frustration Score</span>
-                  <span className="text-[#1E40AF]">{getFrustrationPercentage(prediction.sentiment_score)}%</span>
+                  <span>Urgency / Frustration</span>
+                  <span className="text-[#1E40AF] font-mono">{getFrustrationPercentage(prediction.sentiment_score)}%</span>
                 </div>
-                <div className="mt-2.5 h-2 w-full overflow-hidden rounded bg-slate-200">
-                  <div className="h-full rounded bg-[#1E40AF]" style={{ width: `${getFrustrationPercentage(prediction.sentiment_score)}%` }} />
+                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-[#1E40AF] transition-all duration-500"
+                    style={{ width: `${getFrustrationPercentage(prediction.sentiment_score)}%` }}
+                  />
                 </div>
-                <span className="mt-1 block text-[8px] text-slate-400">Compound NLP Score: {prediction.sentiment_score.toFixed(3)}</span>
+                <span className="mt-1.5 block text-[9px] text-slate-400 font-mono">
+                  Score: {typeof prediction.sentiment_score === 'number' ? prediction.sentiment_score.toFixed(3) : prediction.sentiment_score}
+                </span>
               </div>
             </div>
-            <div className="mt-4 flex items-start gap-1.5 border-t border-blue-200 pt-3 text-[10px] text-slate-500 leading-normal">
-              <ShieldAlert size={12} className="shrink-0 text-slate-400 mt-0.5" />
-              <span>Grievances are auto-assigned to these departments on submission unless overridden. You can change the department in Step 2 above if needed.</span>
+
+            <div className="mt-4 flex items-center gap-2 text-[11px] text-slate-500 border-t border-blue-100 pt-3">
+              <BadgeInfo size={14} className="text-[#1E40AF] shrink-0" />
+              <span>
+                Category auto-selected above based on AI confidence. You may adjust the category manually before submitting if required.
+              </span>
             </div>
           </div>
         ) : (
-          <div className="rounded border border-slate-200 bg-slate-100 p-5 text-center text-xs text-slate-500">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
             <BadgeInfo size={24} className="mx-auto mb-2 text-slate-400" />
-            No analysis results available. Fill in the grievance description and click <strong>"Analyze with AI"</strong> to view classification preview.
+            Fill out the grievance description and click <strong>"Analyze with AI"</strong> to preview natural language classification results.
           </div>
         )}
       </div>
